@@ -6,11 +6,12 @@
 </p>
 
 <p align="center">
-  <a href="#source-and-installation">Source and installation</a> ·
+  <a href="#source-and-installation">Source</a> ·
   <a href="#features">Features</a> ·
-  <a href="docs/README.md">Documentation</a> ·
+  <a href="#documentation">Documentation</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="CONTRIBUTING.md">Contribute</a>
+  <a href="CONTRIBUTING.md">Contribute</a> ·
+  <a href="#community-and-bug-reports">Community</a>
 </p>
 
 <p align="center">
@@ -21,8 +22,8 @@
 </p>
 
 <p align="center">
-  <a href="https://estebanpdn.github.io/">Website — Esteban’s Forge</a> ·
-  <a href="https://discord.gg/BjbzfRYpV">Discord community</a>
+  <a href="https://estebanpdn.github.io/"><img src="docs/images/website.svg" alt="Visit Esteban’s Forge" width="142" height="46"></a>
+  <a href="https://discord.gg/BjbzfRYpV"><img src="docs/images/discord-official.svg" alt="Join our Discord community" width="166" height="46"></a>
 </p>
 
 A native Nintendo 3DS adaptation of **Super Mario 64 DS**, based on
@@ -32,20 +33,20 @@ analog movement, a touch interface and configurable camera and presentation.
 
 This project was developed with the help of [OpenAI Codex](https://openai.com/codex/). Learn more about the development process [here](AI_DEVELOPMENT.md).
 
-**This is an in-development source snapshot. No public binary release has been
-published.** BUILD 24 is the latest local test candidate, checked in Azahar;
-physical Old and New 3DS qualification and full-game testing remain pending.
+**In active development; source available, with no public binary release yet.**
+See [Compatibility](docs/COMPATIBILITY.md) for BUILD 24 test coverage and
+remaining Old/New 3DS hardware qualification.
 
 ## Features
 
 <table>
   <tr>
-    <td width="50%" valign="top"><strong>Explore with analog controls</strong><br>Circle Pad movement, configurable controls and a free C-stick camera on compatible systems. Original, Hybrid and N64 movement modes are available for testing.</td>
-    <td width="50%" valign="top"><strong>Made for two screens</strong><br>Native upper-screen 3D, configurable display modes, stereoscopic presentation and lower-screen touch menus.</td>
+    <td width="50%" valign="top"><strong>Explore with analog controls</strong><br>Circle Pad movement, touch controls and a free C-stick camera on compatible systems. Configurable movement modes.</td>
+    <td width="50%" valign="top"><strong>Made for two screens</strong><br>Native upper-screen 3D, stereoscopic presentation and dedicated lower-screen pause and options menus.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><strong>Prepare once, load directly</strong><br>Build a single .sm64ds companion locally from your compatible European ROM, then read its members directly from SD.</td>
-    <td width="50%" valign="top"><strong>Keep settings and investigate problems</strong><br>Persistent options with backup recovery, adjustable audio, a visible BUILD number and local diagnostic capture tools.</td>
+    <td width="50%" valign="top"><strong>Prepare once, load directly</strong><br>A single .sm64ds companion, prepared locally from your compatible European ROM and read directly from SD.</td>
+    <td width="50%" valign="top"><strong>Keep settings and track problems</strong><br>Persistent options, audio controls, backup recovery and a visible BUILD number for reproducible bug reports.</td>
   </tr>
 </table>
 
@@ -110,6 +111,9 @@ in [diagnostics](docs/DIAGNOSTICS.md).
 Requirements for portable checks: Git, Python 3.11+, CMake 3.20+ and a C++17
 compiler. Clone with the public motion-library submodule:
 
+<details>
+<summary><strong>Clone and run the portable checks</strong></summary>
+
 ```sh
 git clone --recurse-submodules https://github.com/EstebanPdN/sm64ds-3ds.git
 cd sm64ds-3ds
@@ -118,6 +122,8 @@ cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/host --parallel 4
 ctest --test-dir build/host --output-on-failure
 ```
+
+</details>
 
 The complete game additionally requires devkitPro/devkitARM, libctru,
 Citro3D, the pinned Python packages and the local inputs listed in
@@ -161,6 +167,7 @@ do not grant rights to the game or its trademarks.
 <p align="center">
   <a href="https://estebanpdn.github.io/">Esteban’s Forge</a> ·
   <a href="https://discord.gg/BjbzfRYpV">Discord</a> ·
+  <a href="docs/README.md">Documentation</a> ·
   <a href="docs/legal/CREDITS.md">Credits</a> ·
   <a href="docs/legal/THIRD_PARTY_NOTICES.md">Third-party notices</a><br>
   <sub>Super Mario 64 DS belongs to Nintendo. This is an independent fan project.</sub>
