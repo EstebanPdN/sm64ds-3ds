@@ -1,0 +1,16 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+
+[*.{md,yml,yaml,json,cmake}]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+# Imported source keeps its upstream formatting. Do not mass-format providers.

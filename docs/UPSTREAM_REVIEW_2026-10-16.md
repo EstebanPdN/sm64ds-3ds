@@ -1,0 +1,13 @@
+# Upstream review, 2026-10-16
+
+Follow-up checked2026-10-17: the live decomp README now reports100% matched(11,389/11,389) and96.2% linked(10,957/11,389); the earlier percentages below are historical. Matching cartridge bytes and linking the PC port remain distinct from ARM11 performance. Public HEAD observed e8dc126bcda1865cce7a4a4cb920fb2095deefb9; native fork still88725627c529e5d9db57abc5544513d8741fa07d. The attempted public history fetch failed with HTTP/2 disconnect/early EOF (`build/upstream-review/fetch-public-20261017.log`); no newly fetched source or wholesale dependency update is claimed. Pinned vendor/decomp trees remain unchanged.
+
+The public decomp README currently reports100% matched (11,389/11,389),38.4% converted,93.5% linked. These measure different things: original cartridge byte equivalence, readable class conversion, and PC-port integration. They are not an ARM11 performance or complete-hardware acceptance result. Primary source: https://github.com/tangosdev/sm64ds-decomp#progress .
+
+The separate read-only Git review database at build/upstream-review/decomp.git contains reviewed FETCH_HEAD1a9a22a05cb2b38caad1e31e9754b9cecb22966e. Its checked-in README still reports99.9%; the web README has advanced. Keep those evidence snapshots separate. Our immutable 3DS dependency stays at decomp d3022c1463a260ba67a3dc148aea01eb8de92ca3 and native fork88725627c529e5d9db57abc5544513d8741fa07d.
+
+Reviewed changes from the pinned decomp include thousands of source moves and readability conversions. In the reviewed fs.cpp change, Animation becomes dExtFrameCtrl_c in a comment; no SD-loading algorithm changes. Native loader/renderer adaptations cannot be replaced wholesale with the PC HAL. No demonstrated performance fix was imported merely because the match percentage reached100.
+
+Useful original APIs and structures were checked against the decomp: StartFile enters an original scene and SetRealCharacter loads original character models; the clipping planes support a horizontal-only wide correction; original pause state/font/tile handling supports menu extensions. The gray title investigation also traced the permanent white alpha1 veil to original func_ov007_020b2998 and its original alpha0 early-out in func_ov007_020c4684. Our generated-source patch changes that one permanent appearance layer, leaving renderer blending and dynamic fade logic intact.
+
+The native fork explicitly reports New3DS castle/course hardware around30FPS and Old hardware CIA untested: https://github.com/SebastienBreton/sm64ds-3ds#-status . Our higher targets require profiling and real Old/New measurements; emulator survival or60Hz presentation does not establish them.

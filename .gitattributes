@@ -1,0 +1,14 @@
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.webp binary
+*.rgba binary
+*.cgfx binary
+*.glb binary
+*.blend binary
+*.zlib binary
+# Provider integrity checks compare upstream bytes, including line endings.
+third_party/** -text

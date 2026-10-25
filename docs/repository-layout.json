@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "root_files": [".editorconfig", ".gitattributes", ".gitignore", ".gitmodules", "AI_DEVELOPMENT.md", "CHANGELOG.md", "CMakeLists.txt", "CONTRIBUTING.md", "LICENSE.md", "README.md", "reference-native.lock.json", "upstream.lock"],
+  "directories": {
+    ".github": "GitHub issue forms, pull request template, ownership and ROM-free checks",
+    "assets": "Approved runtime interface and packaging artwork with its source context",
+    "cmake": "Host and 3DS build integration",
+    "docs": "Current guides, source maps, provenance and dated research",
+    "include": "Legacy runtime and shared native interfaces",
+    "packaging": "3DS application identity and exheader templates",
+    "scripts": "Repository integrity and public-source checks",
+    "source": "Maintained integration, movement adapter and historical runtime sources",
+    "tests": "Portable, ARM, synthetic and private-input regression drivers",
+    "third_party": "Byte-pinned native provider and motion-library submodule",
+    "tools": "Build, preparation, extraction, diagnostics and verification utilities"
+  },
+  "submodules": {
+    "third_party/libsm64-motion": "fd11813208272b4271d92bd92feb8f3fdbe61be5"
+  },
+  "maintained_docs": ["README.md", "CONTRIBUTING.md", "CHANGELOG.md", "LICENSE.md", "AI_DEVELOPMENT.md", "docs/README.md", "docs/REPOSITORY.md", "docs/ARCHITECTURE.md", "docs/BUILDING.md", "docs/TESTING.md", "docs/COMPATIBILITY.md", "docs/SD-DATA.md", "docs/DIAGNOSTICS.md", "docs/UPSTREAM.md", "docs/ROADMAP.md", "docs/legal/CREDITS.md", "docs/legal/THIRD_PARTY_NOTICES.md", "docs/images/README.md", "source/README.md", "source/integrated_native/README.md", "tools/README.md", "tests/README.md", "third_party/README.md", "assets/README.md", "packaging/README.md", "cmake/README.md"]
+}

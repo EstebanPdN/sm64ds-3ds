@@ -1,0 +1,12 @@
+SM64DS Packer
+
+Super Mario 64 DS original loading/menu artwork, star and fonts: Nintendo.
+These interface graphics are included with the project owner's explicit approval.
+The converter's gameplay payload is always generated from a user-supplied ROM.
+No complete ROM or preconverted game archive is distributed with this tool.
+
+Pixel progress-fill and percent graphics, desktop interface adapter, extraction
+recipes and archive converter: SM64DS native port project.
+
+Desktop GUI: Qt / PySide6 Essentials, The Qt Company and contributors.
+Packaging: PyInstaller contributors. Python: Python Software Foundation.

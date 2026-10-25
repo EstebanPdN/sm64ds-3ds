@@ -1,0 +1,11 @@
+{
+  "selection": "Owner explicitly selected the Mario face icon and logo revision v2 for the final game package",
+  "icon_source": "assets/icons/mario-yellow-approved.png",
+  "banner_archive": "assets/banners/SM64DS-logo-3D-revision-v2.zip",
+  "banner_model": "assets/banners/approved-logo-v2/ready-to-use/sm64ds-logo.cgfx",
+  "banner_preview": "assets/banners/approved-logo-v2/previews/HOME-400x240.png",
+  "native_container_prepared": true,
+  "final_CIA_integration_verified": false,
+  "HOME_Menu_visual_verified": false,
+  "physical_console_verified": false
+}

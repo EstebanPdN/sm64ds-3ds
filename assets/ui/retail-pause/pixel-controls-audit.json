@@ -1,0 +1,42 @@
+{
+  "selection_star": {
+    "original_size": [
+      11,
+      12
+    ],
+    "scale": 1,
+    "exact_original_pixels": true
+  },
+  "confirm": {
+    "original_size": [
+      64,
+      32
+    ],
+    "scale": 1,
+    "exact_original_pixels": true
+  },
+  "arrow_left": {
+    "original_size": [
+      10,
+      14
+    ],
+    "scale": 1,
+    "exact_original_pixels": true
+  },
+  "arrow_right": {
+    "original_size": [
+      10,
+      14
+    ],
+    "scale": 1,
+    "exact_original_pixels": true
+  },
+  "page_down": {
+    "original_size": [
+      22,
+      15
+    ],
+    "scale": 1,
+    "exact_original_pixels": true
+  }
+}

@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible problem in a local test build.
+body:
+  - type: markdown
+    attributes:
+      value: "Include the visible BUILD number. Do not upload ROMs, prepared archives, saves, firmware or full memory dumps."
+  - type: input
+    id: build
+    attributes:
+      label: BUILD number or source commit
+      placeholder: BUILD 24
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System and launch format
+      description: "Old/New model or Azahar version/model; CIA or 3DSX."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include level, camera direction, movement/display settings and stereo state when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence and regression history
+      description: Short log excerpt or reviewed screenshot; mention the last working BUILD if known. Keep raw dumps private.

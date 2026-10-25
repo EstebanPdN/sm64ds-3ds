@@ -1,0 +1,35 @@
+name: ROM-free source checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Check public source tree
+        run: python3 scripts/check-repository.py
+      - name: Prepare pinned public headers
+        run: python3 tools/setup_dependencies.py --backend-only
+      - name: Configure portable checks
+        run: cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug -DSM64DS_ENABLE_SANITIZERS=ON
+      - name: Build portable checks
+        run: cmake --build build/host --parallel 4
+      - name: Run portable checks
+        run: ctest --test-dir build/host --output-on-failure
+      - name: Check build contracts and storage/audio
+        run: |
+          python3 tests/test_build_tools.py
+          python3 tests/integrated_audio_save/run.py

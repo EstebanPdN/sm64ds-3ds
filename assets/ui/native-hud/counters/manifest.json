@@ -1,0 +1,73 @@
+{
+  "assets": {
+    "NUMBERS_0": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_1": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_2": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_3": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_4": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_5": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_6": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_7": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_8": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "NUMBERS_9": {
+      "width": 10,
+      "height": 20,
+      "pieces": 1
+    },
+    "TIMES": {
+      "width": 20,
+      "height": 20,
+      "pieces": 1
+    },
+    "POWER_STAR": {
+      "width": 20,
+      "height": 20,
+      "pieces": 1
+    },
+    "COIN": {
+      "width": 20,
+      "height": 20,
+      "pieces": 1
+    }
+  },
+  "source_report_sha256": "d62a1902a4d24b1c75fea7d2728426ac0ba7bcb014d906972b1ac0d4d5a7db23",
+  "generation": "Explicit final-resolution integer contours; no resizing",
+  "header_sha256": "c25cf8fb5060bb621c2ebca3159641071ed546b9526e931e53102ab55055021e",
+  "limits": "Counter symbols/digits only; portraits/map markers retain original assets until separately authored and validated"
+}

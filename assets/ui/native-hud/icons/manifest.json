@@ -1,0 +1,338 @@
+{
+  "icons": [
+    {
+      "name": "LIFE_ICONS_0",
+      "width": 30,
+      "height": 30,
+      "pieces": 4,
+      "atlas": [
+        64,
+        0
+      ],
+      "sha256": "7dcb11ed7f370bf0938dd53773e09f6e1a89ed72fe27bdb5423d10866b505d71"
+    },
+    {
+      "name": "LIFE_ICONS_1",
+      "width": 30,
+      "height": 30,
+      "pieces": 4,
+      "atlas": [
+        94,
+        0
+      ],
+      "sha256": "084e1e4ea5efd38746068a7f1e0c89ec30004ffeb48ddb17558001adbf715c0e"
+    },
+    {
+      "name": "LIFE_ICONS_2",
+      "width": 30,
+      "height": 30,
+      "pieces": 4,
+      "atlas": [
+        124,
+        0
+      ],
+      "sha256": "2f9efec631edfc38a21a2376390fc08b908d3735a20c626c0260ce1b3833a4a1"
+    },
+    {
+      "name": "LIFE_ICONS_3",
+      "width": 30,
+      "height": 20,
+      "pieces": 2,
+      "atlas": [
+        154,
+        0
+      ],
+      "sha256": "5cf44a9993f9c891cbfab4b10fe9e6bc1553fedd41ec71b4761133b03241d558"
+    },
+    {
+      "name": "MM_ARROW",
+      "width": 20,
+      "height": 20,
+      "pieces": 1,
+      "atlas": [
+        184,
+        0
+      ],
+      "sha256": "298c9738c6647ebc1dfa1131feeefa9ba7dab05f8f3a8c03b8ce27813ee40383"
+    },
+    {
+      "name": "MM_STAR",
+      "width": 40,
+      "height": 40,
+      "pieces": 1,
+      "atlas": [
+        204,
+        0
+      ],
+      "sha256": "165b3515275d32b7142f32a705fe589723dd9c12ee367862e503ad6440cf76ec"
+    },
+    {
+      "name": "MM_SMALL_STAR",
+      "width": 20,
+      "height": 20,
+      "pieces": 1,
+      "atlas": [
+        244,
+        0
+      ],
+      "sha256": "e781bd032facf3b8d1df20dc2be4fa4ac6aa018c5710d88dba6f523e3d779697"
+    },
+    {
+      "name": "MM_STAR_FADED",
+      "width": 40,
+      "height": 40,
+      "pieces": 1,
+      "atlas": [
+        264,
+        0
+      ],
+      "sha256": "a5ca6698a3ebf27a8798cee8904ff85032006fe14799c9b9e220cebdf5caea69"
+    },
+    {
+      "name": "MM_SMALL_STAR_FADED",
+      "width": 20,
+      "height": 20,
+      "pieces": 1,
+      "atlas": [
+        304,
+        0
+      ],
+      "sha256": "e2524ed210f85ce5fa070c41e8bd6eef9b1976946987931626407116ed918f33"
+    },
+    {
+      "name": "MM_SILVER_STAR",
+      "width": 20,
+      "height": 20,
+      "pieces": 1,
+      "atlas": [
+        324,
+        0
+      ],
+      "sha256": "6cc4798ad0239e09cce79711449b893e21ea2a6aa618eff94b6aaffd75e9d067"
+    },
+    {
+      "name": "MM_SILVER_STAR_FADED",
+      "width": 20,
+      "height": 20,
+      "pieces": 1,
+      "atlas": [
+        344,
+        0
+      ],
+      "sha256": "740c1b1741312051c8993bf5db34c3d29b87aa466a8c282155cd0de0774c3469"
+    },
+    {
+      "name": "MM_RED_COIN",
+      "width": 20,
+      "height": 20,
+      "pieces": 1,
+      "atlas": [
+        364,
+        0
+      ],
+      "sha256": "c41b6046042e9e210730823205a4250037889ed2db1bb3c58b8eb3bad6bc3f02"
+    },
+    {
+      "name": "MM_STAR_KEY",
+      "width": 20,
+      "height": 20,
+      "pieces": 1,
+      "atlas": [
+        384,
+        0
+      ],
+      "sha256": "704ba03fa42880821ff742d18c7d5ef1b92571b53917d76135e03af6df419c80"
+    },
+    {
+      "name": "MM_STAR_KEY_BRIGHT",
+      "width": 20,
+      "height": 20,
+      "pieces": 1,
+      "atlas": [
+        404,
+        0
+      ],
+      "sha256": "0e4c492d68056d4dd3e0cae09975f7eacd75e386286a437de82030ad6d3d7fcc"
+    },
+    {
+      "name": "MM_MARIO_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 1,
+      "atlas": [
+        424,
+        0
+      ],
+      "sha256": "abc808598b8632277abf248ff99aff3de4889d2d8d9a618cb928c4d3ddd67cb0"
+    },
+    {
+      "name": "MM_MARIO_W_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 3,
+      "atlas": [
+        464,
+        0
+      ],
+      "sha256": "e257741ac8a9a1dd32461db486f8e216582cfa5007a467e7d33dec2a60117a6e"
+    },
+    {
+      "name": "MM_MARIO_L_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 3,
+      "atlas": [
+        0,
+        64
+      ],
+      "sha256": "85e874c87fce4af3b41e949f834829cd5fca1d5564c74c6b19350ba012eaf8b4"
+    },
+    {
+      "name": "MM_MARIO_NO_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 3,
+      "atlas": [
+        40,
+        64
+      ],
+      "sha256": "56041ba901cf48f0aa4de562d9fd4afbd18e191dd584941255d489b95948610a"
+    },
+    {
+      "name": "MM_LUIGI_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 1,
+      "atlas": [
+        80,
+        64
+      ],
+      "sha256": "9eb773ace87a7bad239e71bd1ecdac31d55293115a2466143c47256c37f9b308"
+    },
+    {
+      "name": "MM_LUIGI_W_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 3,
+      "atlas": [
+        120,
+        64
+      ],
+      "sha256": "928d7e2a89bc62a110623d1eb1ffc6a4dfe18e5fe77deeb18f4c99d1473775de"
+    },
+    {
+      "name": "MM_LUIGI_M_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 3,
+      "atlas": [
+        160,
+        64
+      ],
+      "sha256": "e49066bd0d26e046fc589c1feef4c95124119df75146495e96b3b5be6ec7b391"
+    },
+    {
+      "name": "MM_LUIGI_NO_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 3,
+      "atlas": [
+        200,
+        64
+      ],
+      "sha256": "084a466b4c0600e2fe1c20ab28c59e2c5dd39392eacba0f184aff7ed46de81db"
+    },
+    {
+      "name": "MM_WARIO_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 1,
+      "atlas": [
+        240,
+        64
+      ],
+      "sha256": "1bb1aeaf0afc300babd0d27cc94e6c69f7bd1d0d7e9179adbc127c75a0d2e89d"
+    },
+    {
+      "name": "MM_WARIO_L_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 3,
+      "atlas": [
+        280,
+        64
+      ],
+      "sha256": "052e1342435c1ffd36c6b08bb4f85771cbb1bc160d8b9f8a650db429c96bffe3"
+    },
+    {
+      "name": "MM_WARIO_M_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 3,
+      "atlas": [
+        320,
+        64
+      ],
+      "sha256": "024fa7a4a54b1e232ea382ed6b78cb95100d1cd76b50c895d6db58a38ad42ab6"
+    },
+    {
+      "name": "MM_WARIO_NO_CAP_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 2,
+      "atlas": [
+        360,
+        64
+      ],
+      "sha256": "b288930ea36bca7d3829457351417d75be49d9a6bb2f54e64d26118ece463131"
+    },
+    {
+      "name": "MM_YOSHI_ICON",
+      "width": 40,
+      "height": 40,
+      "pieces": 1,
+      "atlas": [
+        400,
+        64
+      ],
+      "sha256": "468351b98a1883c3e2a49ab00e7b5be4dac760bd06f56354e896e7d8bc7944e8"
+    },
+    {
+      "name": "MM_YOSHI_W_CAP_ICON",
+      "width": 40,
+      "height": 48,
+      "pieces": 3,
+      "atlas": [
+        440,
+        64
+      ],
+      "sha256": "1440b0d2c78cdc39f8990a8c6f69323613ca882a279428482ae3d9d5f3ca0d10"
+    },
+    {
+      "name": "MM_YOSHI_L_CAP_ICON",
+      "width": 40,
+      "height": 46,
+      "pieces": 3,
+      "atlas": [
+        0,
+        112
+      ],
+      "sha256": "38ae109daaeb331a2a3b493158b329483cf65e7ac3dfd98d43eaf9db76fe7b38"
+    },
+    {
+      "name": "MM_YOSHI_M_CAP_ICON",
+      "width": 40,
+      "height": 48,
+      "pieces": 3,
+      "atlas": [
+        40,
+        112
+      ],
+      "sha256": "94934759b3c787905aaa8186b862813e9b339920311347748b588a3ec293711c"
+    }
+  ],
+  "source_report_sha256": "a83e2484873f4ac05463e6ff3ebfc9e57dbdaf6bf12ca39490f46271c509dca3",
+  "header_sha256": "bf7a43ac7aff6248a4681f39b5fdd95007594c68cbe77cb2de4f81f0982e33bb",
+  "method": "Original pixel-colour region traces on final native integer grid; preserves source detail without filtered resampling. Not invented high-resolution detail.",
+  "integration": "Generated art only; exact runtime group admission, atlas rendering and affine marker acceptance pending"
+}

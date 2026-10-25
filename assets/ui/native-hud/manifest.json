@@ -1,0 +1,121 @@
+{
+  "canvas": [
+    320,
+    240
+  ],
+  "sprites": {
+    "arrow_left": {
+      "width": 30,
+      "height": 20,
+      "sha256": "0db003c93e10d45e853aeab1e3f9bde1e0adeca5846feb1c815aed297f119b03"
+    },
+    "camera_left": {
+      "width": 40,
+      "height": 60,
+      "sha256": "d2304e6bca3eb7d3a38a83175772dce75711a18614cfe66e9476a89c63b8bb74"
+    },
+    "camera_left_pressed": {
+      "width": 40,
+      "height": 60,
+      "sha256": "d1e5704a02fe8a2b63575481a407f3c96eb54a52b55f1fda070605e8f03d3304"
+    },
+    "arrow_up": {
+      "width": 20,
+      "height": 30,
+      "sha256": "a1979cac193b249678a6479c7f53c065eac9a4627516e29d6aeb0a20739ec754"
+    },
+    "camera_up": {
+      "width": 40,
+      "height": 60,
+      "sha256": "6e29eebd929028b9073db2d3560e1f423def3b32d6a38c6319f87d052e9b3d9a"
+    },
+    "camera_up_pressed": {
+      "width": 40,
+      "height": 60,
+      "sha256": "352df40e8b0fc7bf744367bcb85f718b7e13febf16776dd4e3e163ec0c64ea06"
+    },
+    "arrow_right": {
+      "width": 30,
+      "height": 20,
+      "sha256": "5ee683f21312e69d2939955f57718e1b489600fcb94f4dcb3b98375cf7f13c51"
+    },
+    "camera_right": {
+      "width": 40,
+      "height": 60,
+      "sha256": "d191aad57263451884b3f07f1f6b85877dc4fbcd1f9a1265ba1e2377318a8b6f"
+    },
+    "camera_right_pressed": {
+      "width": 40,
+      "height": 60,
+      "sha256": "1e9bfb29150d685a7b48e53ec032a2f355f6d05c87d8ff0fe999e99f179ba99b"
+    },
+    "arrow_down": {
+      "width": 20,
+      "height": 30,
+      "sha256": "7de69287f01bd06b6a6993d5e5db9f71de040e396938beb65e28cff1c4880794"
+    },
+    "camera_down": {
+      "width": 40,
+      "height": 60,
+      "sha256": "f799d5db01c3987d2a8648f1b7005e8811b2cb95b649be30cfae5114bde8d1c5"
+    },
+    "camera_down_pressed": {
+      "width": 40,
+      "height": 60,
+      "sha256": "158398a27ac49ec2ba004034c72155c9725956c42713e6ea07288be1bfb6f1c2"
+    },
+    "camera_left_small": {
+      "width": 40,
+      "height": 40,
+      "sha256": "d04bf5f17a84a75562d8e3d097c5f17f9d0dd7ab1071faa5faed793b2777b729"
+    },
+    "camera_left_small_pressed": {
+      "width": 40,
+      "height": 40,
+      "sha256": "1b9291757ca76700cd9a0f04f53a0bbbfc3aeda3bbbe01a412b0e5ca36098252"
+    },
+    "camera_right_small": {
+      "width": 40,
+      "height": 40,
+      "sha256": "7de4eedf8d0b81886682134fc1c1405bacd97285a1688a3291f843abbde08bea"
+    },
+    "camera_right_small_pressed": {
+      "width": 40,
+      "height": 40,
+      "sha256": "b72abc842496e25f198d7d7c06ccef9da5d9da73c6bdaeb57c42dc45ca4daf21"
+    },
+    "camera_zoom": {
+      "width": 40,
+      "height": 60,
+      "sha256": "002dd7ee48195bc5a8bae5cf901e019f1ec62d74b8c5a89c9bdb4ff474341904"
+    },
+    "camera_zoom_pressed": {
+      "width": 40,
+      "height": 60,
+      "sha256": "17d12645dd8467ac0f79723f6d4f623b269bbdef0997563b3eed1c637646d166"
+    },
+    "camera_zoom_small": {
+      "width": 40,
+      "height": 40,
+      "sha256": "abdc63830b8ca854e6fef55f122dc43dfe34309551e7b3ad2a0b9d565b2e7e01"
+    },
+    "camera_zoom_small_pressed": {
+      "width": 40,
+      "height": 40,
+      "sha256": "3c0bd286c4b0aeb96e603c09dc680b205788b110e3f2a10b72175e3a0b474e77"
+    },
+    "star": {
+      "width": 20,
+      "height": 20,
+      "sha256": "d05df1553ab3c3a6ca480d9746cf34517868a16c89311c20338573c2f8bba21a"
+    },
+    "multiply": {
+      "width": 12,
+      "height": 12,
+      "sha256": "0c3c623fab01e5a92e4c9c0d0da1401fbcc2c2b3953d1a9c33182d310f4ecac8"
+    }
+  },
+  "generation": "Integer pixel masks, contours and bevel rules. No resize or antialiasing.",
+  "integration": "All12left/right/zoom large/small normal/pressed camera variants integrated; remaining HUD and physical acceptance pending",
+  "scope": "Camera directions/pressed states and star/multiply HUD symbols; not every gameplay sprite"
+}

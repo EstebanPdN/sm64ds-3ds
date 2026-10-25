@@ -1,0 +1,624 @@
+{
+  "review_only": true,
+  "selected_layout": "E-original-HUD-integer-arrows",
+  "source_url": "https://www.spriters-resource.com/ds_dsi/supermario64ds/asset/137713/",
+  "source_sha256": "5b0e62345d6ec6248ddcb6b2beee7b4eea398f85ac75b895b483f5b8a4fa0631",
+  "credit": "Storice / The Spriters Resource; original Nintendo assets",
+  "canvas": [
+    320,
+    240
+  ],
+  "filter": "nearest; no redrawing",
+  "crops": {
+    "yoshi_life": [
+      260,
+      36,
+      280,
+      55
+    ],
+    "yoshi_map": [
+      260,
+      76,
+      280,
+      108
+    ],
+    "star": [
+      190,
+      195,
+      207,
+      213
+    ],
+    "coin": [
+      190,
+      0,
+      206,
+      19
+    ],
+    "times": [
+      206,
+      0,
+      221,
+      19
+    ],
+    "left": [
+      260,
+      283,
+      292,
+      315
+    ],
+    "right": [
+      294,
+      283,
+      326,
+      315
+    ],
+    "map_star": [
+      260,
+      207,
+      289,
+      234
+    ],
+    "0": [
+      260,
+      0,
+      270,
+      18
+    ],
+    "1": [
+      270,
+      0,
+      280,
+      18
+    ],
+    "2": [
+      280,
+      0,
+      290,
+      18
+    ],
+    "3": [
+      290,
+      0,
+      300,
+      18
+    ],
+    "4": [
+      300,
+      0,
+      310,
+      18
+    ],
+    "5": [
+      310,
+      0,
+      320,
+      18
+    ],
+    "6": [
+      320,
+      0,
+      330,
+      18
+    ],
+    "7": [
+      330,
+      0,
+      340,
+      18
+    ],
+    "8": [
+      340,
+      0,
+      350,
+      18
+    ],
+    "9": [
+      350,
+      0,
+      360,
+      18
+    ]
+  },
+  "layouts": {
+    "A-original": [
+      {
+        "sprite": "yoshi_life",
+        "x": 10,
+        "y": 10,
+        "width": 20,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 32,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "4",
+        "x": 48,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "star",
+        "x": 260,
+        "y": 10,
+        "width": 16,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 278,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "1",
+        "x": 294,
+        "y": 10,
+        "width": 6,
+        "height": 15
+      },
+      {
+        "sprite": "2",
+        "x": 302,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "coin",
+        "x": 140,
+        "y": 10,
+        "width": 14,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 156,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "0",
+        "x": 172,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "left",
+        "x": 10,
+        "y": 198,
+        "width": 32,
+        "height": 32
+      },
+      {
+        "sprite": "right",
+        "x": 278,
+        "y": 198,
+        "width": 32,
+        "height": 32
+      },
+      {
+        "sprite": "yoshi_map",
+        "x": 150,
+        "y": 147,
+        "width": 19,
+        "height": 24
+      },
+      {
+        "sprite": "star",
+        "x": 223,
+        "y": 94,
+        "width": 16,
+        "height": 16
+      }
+    ],
+    "B-balanced": [
+      {
+        "sprite": "yoshi_life",
+        "x": 10,
+        "y": 10,
+        "width": 25,
+        "height": 20
+      },
+      {
+        "sprite": "times",
+        "x": 37,
+        "y": 12,
+        "width": 18,
+        "height": 16
+      },
+      {
+        "sprite": "4",
+        "x": 57,
+        "y": 10,
+        "width": 10,
+        "height": 19
+      },
+      {
+        "sprite": "star",
+        "x": 248,
+        "y": 10,
+        "width": 20,
+        "height": 20
+      },
+      {
+        "sprite": "times",
+        "x": 270,
+        "y": 12,
+        "width": 18,
+        "height": 16
+      },
+      {
+        "sprite": "1",
+        "x": 290,
+        "y": 10,
+        "width": 8,
+        "height": 19
+      },
+      {
+        "sprite": "2",
+        "x": 300,
+        "y": 10,
+        "width": 10,
+        "height": 19
+      },
+      {
+        "sprite": "coin",
+        "x": 135,
+        "y": 10,
+        "width": 18,
+        "height": 20
+      },
+      {
+        "sprite": "times",
+        "x": 155,
+        "y": 12,
+        "width": 18,
+        "height": 16
+      },
+      {
+        "sprite": "0",
+        "x": 175,
+        "y": 10,
+        "width": 10,
+        "height": 19
+      },
+      {
+        "sprite": "left",
+        "x": 10,
+        "y": 190,
+        "width": 40,
+        "height": 40
+      },
+      {
+        "sprite": "right",
+        "x": 270,
+        "y": 190,
+        "width": 40,
+        "height": 40
+      },
+      {
+        "sprite": "yoshi_map",
+        "x": 150,
+        "y": 147,
+        "width": 19,
+        "height": 24
+      },
+      {
+        "sprite": "star",
+        "x": 223,
+        "y": 94,
+        "width": 16,
+        "height": 16
+      }
+    ],
+    "C-integer-double": [
+      {
+        "sprite": "yoshi_life",
+        "x": 8,
+        "y": 8,
+        "width": 40,
+        "height": 32
+      },
+      {
+        "sprite": "times",
+        "x": 50,
+        "y": 11,
+        "width": 28,
+        "height": 26
+      },
+      {
+        "sprite": "4",
+        "x": 80,
+        "y": 9,
+        "width": 16,
+        "height": 30
+      },
+      {
+        "sprite": "star",
+        "x": 218,
+        "y": 8,
+        "width": 32,
+        "height": 32
+      },
+      {
+        "sprite": "times",
+        "x": 252,
+        "y": 11,
+        "width": 28,
+        "height": 26
+      },
+      {
+        "sprite": "1",
+        "x": 282,
+        "y": 9,
+        "width": 12,
+        "height": 30
+      },
+      {
+        "sprite": "2",
+        "x": 296,
+        "y": 9,
+        "width": 16,
+        "height": 30
+      },
+      {
+        "sprite": "coin",
+        "x": 122,
+        "y": 46,
+        "width": 28,
+        "height": 32
+      },
+      {
+        "sprite": "times",
+        "x": 152,
+        "y": 49,
+        "width": 28,
+        "height": 26
+      },
+      {
+        "sprite": "0",
+        "x": 182,
+        "y": 47,
+        "width": 16,
+        "height": 30
+      },
+      {
+        "sprite": "left",
+        "x": 8,
+        "y": 200,
+        "width": 32,
+        "height": 32
+      },
+      {
+        "sprite": "right",
+        "x": 280,
+        "y": 200,
+        "width": 32,
+        "height": 32
+      },
+      {
+        "sprite": "yoshi_map",
+        "x": 150,
+        "y": 147,
+        "width": 19,
+        "height": 24
+      },
+      {
+        "sprite": "star",
+        "x": 223,
+        "y": 94,
+        "width": 16,
+        "height": 16
+      }
+    ],
+    "D-approved-A-hud-B-arrows": [
+      {
+        "sprite": "yoshi_life",
+        "x": 10,
+        "y": 10,
+        "width": 20,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 32,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "4",
+        "x": 48,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "star",
+        "x": 260,
+        "y": 10,
+        "width": 16,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 278,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "1",
+        "x": 294,
+        "y": 10,
+        "width": 6,
+        "height": 15
+      },
+      {
+        "sprite": "2",
+        "x": 302,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "coin",
+        "x": 140,
+        "y": 10,
+        "width": 14,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 156,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "0",
+        "x": 172,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "left",
+        "x": 10,
+        "y": 190,
+        "width": 40,
+        "height": 40
+      },
+      {
+        "sprite": "right",
+        "x": 270,
+        "y": 190,
+        "width": 40,
+        "height": 40
+      },
+      {
+        "sprite": "yoshi_map",
+        "x": 150,
+        "y": 147,
+        "width": 19,
+        "height": 24
+      },
+      {
+        "sprite": "star",
+        "x": 223,
+        "y": 94,
+        "width": 16,
+        "height": 16
+      }
+    ],
+    "E-original-HUD-integer-arrows": [
+      {
+        "sprite": "yoshi_life",
+        "x": 10,
+        "y": 10,
+        "width": 20,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 32,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "4",
+        "x": 48,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "star",
+        "x": 260,
+        "y": 10,
+        "width": 16,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 278,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "1",
+        "x": 294,
+        "y": 10,
+        "width": 6,
+        "height": 15
+      },
+      {
+        "sprite": "2",
+        "x": 302,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "coin",
+        "x": 140,
+        "y": 10,
+        "width": 14,
+        "height": 16
+      },
+      {
+        "sprite": "times",
+        "x": 156,
+        "y": 11,
+        "width": 14,
+        "height": 13
+      },
+      {
+        "sprite": "0",
+        "x": 172,
+        "y": 10,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "sprite": "left",
+        "x": 10,
+        "y": 198,
+        "width": 32,
+        "height": 32
+      },
+      {
+        "sprite": "right",
+        "x": 278,
+        "y": 198,
+        "width": 32,
+        "height": 32
+      },
+      {
+        "sprite": "yoshi_map",
+        "x": 150,
+        "y": 147,
+        "width": 19,
+        "height": 24
+      },
+      {
+        "sprite": "star",
+        "x": 223,
+        "y": 94,
+        "width": 16,
+        "height": 16
+      }
+    ]
+  }
+}

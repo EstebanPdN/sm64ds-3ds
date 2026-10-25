@@ -1,0 +1,11 @@
+.venv/
+build/
+dist/
+__pycache__/
+*.sm64ds
+*.part
+dist-*/
+build-*/
+*.log
+*.zip
+*.json.report

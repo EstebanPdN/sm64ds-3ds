@@ -1,0 +1,113 @@
+# Experimental ROM-only integrated native build. Historical preview is separate.
+# Homebrew RSF layout: Steveice10/buildtools template (MIT, 2016-2020).
+# Game data is prepared privately from sdmc:/3ds/sm64ds/ on the console.
+BasicInfo:
+  Title: SM64DS
+  ProductCode: CTR-H-SM64
+  Logo: Homebrew
+
+TitleInfo:
+  Category: Application
+  UniqueId: 0xF5364
+
+Option:
+  UseOnSD: true
+  FreeProductCode: true
+  MediaFootPadding: false
+  EnableCrypt: false
+  EnableCompress: true
+
+AccessControlInfo:
+  CoreVersion: 2
+  DescVersion: 2
+  ReleaseKernelMajor: "02"
+  ReleaseKernelMinor: "33"
+  UseExtSaveData: false
+  FileSystemAccess:
+    - DirectSdmc
+    - DirectSdmcWrite
+    # One bit of the 0x1005 title-content mask; DSP reads the console's HOME Menu.
+    - CategoryFileSystemTool
+  MemoryType: Application
+  # 80 MB (Dev2): 96 MB leaves the Old 3DS SYSTEM region 12 MB and the HOME
+  # Menu (about 20.5 MB there) crashes on launch. 80 MB leaves 28 MB.
+  SystemMode: 80MB
+  IdealProcessor: 0
+  AffinityMask: 3
+  Priority: 16
+  MaxCpu: 0x9E
+  HandleTableSize: 0x200
+  DisableDebug: false
+  EnableForceDebug: false
+  CanWriteSharedPage: true
+  CanUsePrivilegedPriority: false
+  CanUseNonAlphabetAndNumber: true
+  PermitMainFunctionArgument: true
+  CanShareDeviceMemory: true
+  RunnableOnSleep: false
+  SpecialMemoryArrange: false
+  # New 3DS profile (console_profile.hpp): 124 MB, 804 MHz with L2 cache and
+  # core 2 for the presentation worker. An Old 3DS ignores these fields.
+  SystemModeExt: 124MB
+  CpuSpeed: 804MHz
+  EnableL2Cache: true
+  CanAccessCore2: true
+  IORegisterMapping:
+    - 1ff00000-1ff7ffff
+  MemoryMapping:
+    - 1f000000-1f5fffff:r
+  SystemCallAccess:
+    ControlMemory: 1
+    QueryMemory: 2
+    ExitProcess: 3
+    CreateThread: 8
+    ExitThread: 9
+    SleepThread: 10
+    GetThreadPriority: 11
+    ReleaseMutex: 20
+    CreateEvent: 23
+    SignalEvent: 24
+    ClearEvent: 25
+    MapMemoryBlock: 31
+    UnmapMemoryBlock: 32
+    CreateAddressArbiter: 33
+    ArbitrateAddress: 34
+    CloseHandle: 35
+    WaitSynchronization1: 36
+    WaitSynchronizationN: 37
+    DuplicateHandle: 39
+    GetSystemTick: 40
+    GetSystemInfo: 42
+    ConnectToPort: 45
+    SendSyncRequest: 50
+    GetResourceLimit: 56
+    GetResourceLimitLimitValues: 57
+    GetResourceLimitCurrentValues: 58
+    # CRT, GPU command and NDSP invariant failures.
+    Break: 60
+    # Native DS address aliases fall back to this on a duplicated own handle.
+    ControlProcessMemory: 112
+  ServiceAccessControl:
+    - APT:U
+    - cfg:u
+    - dsp::DSP
+    - fs:USER
+    - gsp::Gpu
+    - gsp::Lcd
+    - hid:USER
+    - ir:rst
+    - mcu::HWC
+    - ptm:u
+    - ptm:sysm
+
+SystemControlInfo:
+  SaveDataSize: 0KB
+  RemasterVersion: 0
+  StackSize: 0x100000
+  Dependency:
+    cfg: 0x0004013000001702
+    dsp: 0x0004013000001a02
+    gsp: 0x0004013000001c02
+    hid: 0x0004013000001d02
+    ir: 0x0004013000003302
+    ptm: 0x0004013000002202

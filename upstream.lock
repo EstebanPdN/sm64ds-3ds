@@ -1,0 +1,4 @@
+repository=https://github.com/tangosdev/sm64ds-decomp.git
+game_branch=port/release-0.4.0
+game_commit=6230b2996636e3fd0e03cb178161c94cb4b73cc9
+decoder_commit=6de1a65b0d84603ffb4cdb78b4eadeae5cf107b7

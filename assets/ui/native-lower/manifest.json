@@ -1,0 +1,35 @@
+{
+  "canvas": [
+    320,
+    240
+  ],
+  "sprites": {
+    "button": [
+      288,
+      36
+    ],
+    "selected": [
+      288,
+      36
+    ],
+    "footer": [
+      88,
+      30
+    ],
+    "audio": [
+      288,
+      76
+    ],
+    "card": [
+      288,
+      112
+    ],
+    "bar": [
+      256,
+      18
+    ]
+  },
+  "backgrounds_replaced": false,
+  "glyph_source": "Existing approved original bitmap glyph silhouettes, copied1:1 into native pixels; no fractional scaling",
+  "runtime_integration": "dump screen first; complete menu/HUD integration pending"
+}

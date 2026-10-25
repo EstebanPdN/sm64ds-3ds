@@ -1,0 +1,78 @@
+{
+  "sources": {
+    "cee/data/2D_cad/EUR/ENG/d_2d_touch_select_4bit_E_ncg.bin": "36665fa85e0c6fbf3ed59df9021fe36781ad3957b149ed420a638a7c2261a3d1",
+    "c2d/data/2D_cad/d_2d_touch_select_4bit_ncl.bin": "565df19b8c7a920d74e29a21c1adfa277ed93850ab691d4f5071cf1ac94e721a",
+    "cee/data/2D_cad/EUR/ENG/d_2d_btm_framework_play_mode_select_E_nsc.bin": "74016bf5c8b32a0a5ee0fe3804be50ec89ecce06708d815e5698c0aa6c8e185f",
+    "assets/ui/retail-pause/reference/surround.png": "0566bb5a5805c908cf0f896f31f076ccb8d396ccc30f7967f8b32e3c02eee196",
+    "assets/ui/retail-pause/reference/fonts/menu-elements.png": "e54679b184f1c3041bb580821352e1f0401b117d67e1d4c9a79aa3159e7975f9"
+  },
+  "scale": "all menu controls 1x (no fractional resize); frames extend only the flat interior",
+  "crops": {
+    "selected": [
+      48,
+      32,
+      208,
+      64
+    ],
+    "normal": [
+      48,
+      72,
+      208,
+      104
+    ],
+    "ok": [
+      96,
+      152,
+      160,
+      186
+    ],
+    "back": [
+      216,
+      152,
+      248,
+      186
+    ],
+    "action": [
+      0,
+      0,
+      1,
+      1
+    ],
+    "shortcut_plus": [
+      0,
+      0,
+      1,
+      1
+    ],
+    "confirm": [
+      0,
+      0,
+      1,
+      1
+    ],
+    "selection_star": [
+      0,
+      0,
+      1,
+      1
+    ],
+    "arrow_left": [
+      0,
+      0,
+      1,
+      1
+    ],
+    "arrow_right": [
+      0,
+      0,
+      1,
+      1
+    ],
+    "page_down": [
+      0,
+      0,
+      1,
+      1
+    ]
+  }
+}
