@@ -21,10 +21,6 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/build-24-pause.png" alt="BUILD 24 in Azahar, showing Bob-omb Battlefield above the native touch pause menu" width="400">
-</p>
-
-<p align="center">
   <a href="https://estebanpdn.github.io/">Website — Esteban’s Forge</a> ·
   <a href="https://discord.gg/BjbzfRYpV">Discord community</a>
 </p>
