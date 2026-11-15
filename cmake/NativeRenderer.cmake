@@ -373,9 +373,17 @@ else()
     DEPENDS tests/native_renderer/prepare_uniform_oracle.py third_party/citro3d-uniforms-1.7.1/uniforms.c VERBATIM)
   add_executable(test_native_sdk_uniforms tests/native_renderer/sdk_uniforms.cpp
     source/native_renderer/native_uniforms.cpp "${NATIVE_UNIFORM_ORACLE}")
-  # Compile the upstream C unchanged; Clang diagnoses its original enum seam.
-  set_source_files_properties("${NATIVE_UNIFORM_ORACLE}" PROPERTIES COMPILE_OPTIONS
-    "$<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-implicit-enum-enum-cast>;$<$<C_COMPILER_ID:GNU>:-Wno-enum-conversion>")
+  # Compile the upstream C unchanged; compilers diagnose its original enum
+  # seam. Newer Clang names it -Wimplicit-enum-enum-cast; older Clang (as on
+  # the Ubuntu CI runner) and GCC report it under -Wenum-conversion.
+  include(CheckCCompilerFlag)
+  check_c_compiler_flag(-Wimplicit-enum-enum-cast SM64DS_C_HAS_IMPLICIT_ENUM_ENUM_CAST)
+  if(SM64DS_C_HAS_IMPLICIT_ENUM_ENUM_CAST)
+    set(NATIVE_ORACLE_ENUM_OPTION -Wno-implicit-enum-enum-cast)
+  else()
+    set(NATIVE_ORACLE_ENUM_OPTION -Wno-enum-conversion)
+  endif()
+  set_source_files_properties("${NATIVE_UNIFORM_ORACLE}" PROPERTIES COMPILE_OPTIONS "${NATIVE_ORACLE_ENUM_OPTION}")
   target_include_directories(test_native_sdk_uniforms PRIVATE tests/native_renderer/uniform_stubs source/native_renderer)
   target_compile_options(test_native_sdk_uniforms PRIVATE -UNDEBUG -Wall -Wextra -Werror)
   add_test(NAME native_sdk_uniforms_reference COMMAND test_native_sdk_uniforms 0)
