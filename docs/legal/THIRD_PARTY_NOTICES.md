@@ -11,7 +11,8 @@ repository grants rights to Nintendo game data or trademarks.
 | SM64DS decompilation | [Pinned MIT notice](https://github.com/SebastienBreton/sm64ds-decomp/blob/d3022c1463a260ba67a3dc148aea01eb8de92ca3/LICENSE) | Fetched source; ROM/extracted game inputs are excluded. |
 | sseqplayer | [WTFPL v2 text](../../third_party/sm64ds-3ds/port/third_party/sseqplayer/LICENSE.TXT) | Vendored upstream audio component. |
 | SM64 3DS reference | [Pinned source](https://github.com/mkst/sm64-port/tree/3f3c01eae67d6e9f3af89bc8073e37a5d153e00f) | Fetched for checked function imports; no new blanket license is assigned to its source or game assets. |
-| devkitPro / libctru / Citro3D | Their installed upstream notices | SDK dependencies, not copied into the public tree. |
+| devkitPro / libctru / Citro3D | Their installed upstream notices | SDK dependencies, installed separately. |
+| Citro3D 1.7.1 sources | [zlib notice](../../third_party/citro3d-uniforms-1.7.1/LICENSE) | Four unmodified files used as host test oracles; `source/native_renderer/native_uniforms.cpp` adapts `uniforms.c` and keeps the notice. |
 | Python build/analysis packages | Their installed upstream notices | Package versions are declared by the build tools/guides; environments are excluded. |
 | Qt / PySide6 | Upstream Qt/PySide terms, including applicable LGPL/GPL/commercial options | Source utility imports the installed package; frozen packages need their own dependency notices. |
 | PyInstaller | Upstream GPL with bootloader exception | Local desktop packaging tool; no frozen application is published here. |

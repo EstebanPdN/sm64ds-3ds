@@ -1,4 +1,19 @@
-## Current local test candidate — BUILD 24, f79b2d5aaa2ef29b (2026-10-25)
+## Current local test candidate — BUILD 135, native renderer (2026-11-15)
+
+Native-test CIA, title `000400000F536500`, SHA-256
+`3cf0f412b74f8368c2fdc7b2b97a5c39b8d96492eb7827330f6550d37e969f59`.
+Adds Lock FPS (30 / 60 / Unlocked) to the native renderer, an overlapped
+interpolated pair for the Old 3DS, exact CPU and GPU-command cost cuts with
+console switches back to the BUILD 133 paths, a non-blocking audio hand-off
+and three 2D fixes. Host suites pass; in Azahar (Old and New profiles, .3dsx
+and the 80 MiB CIA) screenshots match BUILD 133 in every mode. Physical
+qualification is pending. Details and measurements:
+[current-work checklist](CURRENT_WORK_CHECKLIST.md),
+[60 FPS budget](NATIVE_60FPS_BUDGET.md), [test mode](TEST_MODE.md).
+
+The integrated package line (below) last produced BUILD 24.
+
+## Integrated package — BUILD 24, f79b2d5aaa2ef29b (2026-10-25)
 
 The owner's Luma crash `00000005` is a data abort at `Heap::Allocate`, with
 `r0 = FAR = 0`. Its complete 96-byte code window matches the previous

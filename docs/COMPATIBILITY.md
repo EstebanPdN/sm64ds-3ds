@@ -1,8 +1,15 @@
 # Compatibility and current status
 
-**In development; no public binary release.** The current runtime baseline
-is local BUILD 24. Source publication adds organization, documentation and
-portable dependency selection; it does not create another tested game build.
+**In development; no public binary release.** Two local lines exist:
+
+- **Native-renderer test candidates** (native-test CIA, title
+  `000400000F536500`): the current testing line. Latest: BUILD 135
+  (2026-11-15), checked in Azahar; console qualification pending.
+- **Integrated package** (title `000400000F536400`): last numbered package
+  BUILD 24 (2026-10-25), with the provider's renderer.
+
+Source updates add organization and documentation; they do not create
+another tested game build.
 
 ## Inputs and launch formats
 
@@ -15,6 +22,7 @@ portable dependency selection; it does not create another tested game build.
 | Controls | Original actions, Circle Pad analog input, touch UI and configurable movement/camera. |
 | C-stick | Compatible New systems; Old systems use available original controls. |
 | Presentation | Native upper-screen rendering, alternate display modes and eligible stereo/interpolation. |
+| Lock FPS (native renderer) | 30, 60 or Unlocked in the pause menu; Auto is 30 on Old and 60 on New. 60 and Unlocked show an interpolated and an exact image per 30 Hz update when they fit. |
 
 Other ROM regions/revisions and modified ROMs are not accepted by the
 integrated preparation contract. The old model viewer has a different USA
@@ -42,6 +50,7 @@ to be qualified on identified devices.
 | Azahar Old/New | First boot, directed level, pause and visible build checked; save/backup recovery checked in isolated profiles. |
 | Original title flow | Old introduction → title/options → file selector observed with real touch input. |
 | Whole-game progression | Incomplete coverage. |
+| Native renderer BUILD 135 | Host suites pass; in Azahar (Old and New profiles, 80 MiB CIA) screenshots match BUILD 133 with Lock FPS 30, 60 and Unlocked, and with the older paths switched back on. |
 | Physical Old/New | Pending qualification. |
 | Sustained FPS / audible quality / power-loss safety | No general hardware claim. |
 

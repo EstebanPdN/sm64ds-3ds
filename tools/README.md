@@ -8,7 +8,10 @@ and inspection helpers are grouped below by naming convention.
 | --- | --- |
 | `setup_dependencies.py` | Prepare/verify fixed public source checkouts without game downloads. |
 | `build_integrated_native.py` | Current integrated candidate: gates, ARM build, audits, source freeze and BUILD reservation. |
-| `prepare_integrated_*.py` | Contract-checked transformations of generated provider copies. |
+| `prepare_integrated_*.py` | Contract-checked transformations of generated provider copies (`prepare_integrated_native_renderer.py` adds the native renderer and its PPU patches). |
+| `native_renderer/` | Native renderer asset preparation, laboratory checks, PPU patch fragments and the [build pipeline](native_renderer/pipeline/README.md). See its [README](native_renderer/README.md). |
+| `package_native_renderer_hardware.py` | Native-test CIA from a tested native-renderer session. |
+| `test_mode_dump.py`, `test_mode_report.py`, `test_mode_sheet.py` | Read SELECT+START test-mode dumps and reports and make contact sheets; see [test mode](../docs/TEST_MODE.md). |
 | `package_integrated_cia.py`, `verify_integrated_cia.py` | Local package creation and executable/exheader verification. |
 | `verify_native_3dsx.py`, `audit_integrated_native.py` | ELF/3DSX identity, link and native closure checks. |
 | `run_integrated_native.py`, `run_integrated_campaign.py` | Isolated local emulator acquisition and scenario campaigns. |
@@ -16,6 +19,7 @@ and inspection helpers are grouped below by naming convention.
 | `inspect_luma_dump.py`, `read_mapped_capture.py` | Validated local crash/process-memory readers. |
 | `generate_integrated_*.py`, UI generators | Local catalogs, checked ROM resource recipes and approved interface headers. |
 | `test_integrated_*.py`, `gate_integrated_render60.py` | Synthetic/resource gates used by the builder. |
+| `test_native_*_arm.py` (renderer math, normalize, affine, producer cuts) | devkitARM builds of native renderer kernels run in Unicorn against host references. |
 | `movement_lab/` | Motion source adaptation, solver build, lab and contact analysis. |
 | `sm64ds_packer/` | Desktop/CLI companion converter; see [Packer guide](../docs/SM64DS_PACKER.md). |
 | `native_core.py`, `link_native.py`, `build_native_runtime.py` | Historical runtime/ABI build path. |

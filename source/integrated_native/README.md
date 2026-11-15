@@ -15,6 +15,9 @@ or a closed candidate as the source of a fix.
 - `movement/`: actor/session ownership, DS collision/platform bridge and
   optional N64 solver adaptation.
 - `native_diagnostics.hpp`: readable process/VRAM/display capture integration.
+- `renderer/`: game-side adapters of the [native renderer](../native_renderer/README.md)
+  (scene capture, render worker, Lock FPS and the SELECT+START test mode).
+  See its [README](renderer/README.md).
 
 `options/build_version.hpp` is the current reserved BUILD counter. The
 builder increments it before freezing sources. `options/atomic_file.hpp`

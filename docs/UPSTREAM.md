@@ -9,6 +9,7 @@ updating a pin.
 | Native SM64DS backend | `reference-native.lock.json`: Sébastien Breton `88725627c529e5d9db57abc5544513d8741fa07d` | 768 vendored files under `third_party/sm64ds-3ds/`. |
 | Backend decompilation | Same lock: `d3022c1463a260ba67a3dc148aea01eb8de92ca3` | Public source checkout prepared locally; extracted data stays private. |
 | libsm64 | `.gitmodules` and gitlink `fd11813208272b4271d92bd92feb8f3fdbe61be5` | Public motion-library source, cloned recursively. |
+| Citro3D emission references | Tag `v1.7.1`, file hashes in `tests/native_renderer/prepare_uniform_oracle.py` | Four unmodified sources under `third_party/citro3d-uniforms-1.7.1/`, host test oracles only. |
 | SM64 3DS movement reference | `tools/movement_lab/port_source.py`: `3f3c01eae67d6e9f3af89bc8073e37a5d153e00f` | Checked function import into a generated solver copy. |
 | Historical game/decoder references | `upstream.lock` | Earlier runtime/viewer experiments, retained separately. |
 

@@ -10,14 +10,18 @@ consume them directly.
 | `source/integrated_native/` | Current boot, archive, rendering and platform adapters. |
 | `source/integrated_native/options/` | Settings, pause/touch UI, camera, profiles, audio/storage helpers and diagnostics. |
 | `source/integrated_native/movement/` | Solver ownership and bridge to DS actors, geometry and moving platforms. |
+| `source/integrated_native/renderer/` | Native renderer game-side adapters, render worker, Lock FPS and test mode. |
+| `source/native_renderer/` | Native Citro3D renderer: contracts, GPU backend, assets, lighting, batching and composition. |
 | `source/movement_lab/` | Separate movement laboratory application. |
 | `source/core/`, `source/ctr/`, `source/game_port/`, `source/game_data/` | Shared parsers and historical native viewer/runtime work. |
 | `source/vendor/ntr/`, `include/ntr/` | Attributed NTR decoding source and interfaces. |
 | `include/sm64ds/` | Shared/historical runtime declarations. |
 | `third_party/sm64ds-3ds/` | Immutable, byte-pinned native provider snapshot. |
 | `third_party/libsm64-motion/` | Public motion-library Git submodule. |
+| `third_party/citro3d-uniforms-1.7.1/` | Unmodified Citro3D sources used as host test oracles. |
 | `tools/` | Stable build/preparation entry points, audits, local acquisition and analysis. |
 | `tools/movement_lab/` | Solver preparation and lab builders. |
+| `tools/native_renderer/` | Native renderer asset preparation, laboratory checks, PPU patches and the build/run/compare pipeline. |
 | `tools/sm64ds_packer/` | Cross-platform desktop companion converter. |
 | `cmake/` | Portable checks and integrated target definitions. |
 | `tests/` | Regression code, authored fixtures and private-input runners. |

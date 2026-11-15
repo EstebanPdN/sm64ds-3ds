@@ -17,7 +17,7 @@
 <p align="center">
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/status.svg" alt="Status: in development" height="22"></a>
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/platform.svg" alt="Target: Old and New Nintendo 3DS" height="22"></a>
-  <a href="docs/STATUS.md"><img src="docs/images/badges/build.svg" alt="Latest local test candidate: BUILD 24" height="22"></a>
+  <a href="docs/STATUS.md"><img src="docs/images/badges/build.svg" alt="Latest local test candidate: BUILD 135" height="22"></a>
   <a href="LICENSE.md"><img src="docs/images/badges/license.svg" alt="Component-specific licenses" height="22"></a>
 </p>
 
@@ -36,7 +36,8 @@ analog movement, a touch interface and configurable camera and presentation.
 This project was developed with the help of [OpenAI Codex](https://openai.com/codex/). Learn more about the development process [here](AI_DEVELOPMENT.md).
 
 **In active development; source available, with no public binary release yet.**
-See [Compatibility](docs/COMPATIBILITY.md) for BUILD 24 test coverage and
+The latest local test candidate is BUILD 135 (native renderer). See
+[Compatibility](docs/COMPATIBILITY.md) for what has been checked and the
 remaining Old/New 3DS hardware qualification.
 
 ## Features
@@ -52,10 +53,11 @@ remaining Old/New 3DS hardware qualification.
   </tr>
 </table>
 
-The original simulation and visual presentation use separate clocks. The
-optional 60 Hz presentation path interpolates eligible frames; it is not a
-claim of sustained 60 FPS on either console model. See
-[compatibility and evidence](docs/COMPATIBILITY.md).
+The original simulation keeps its 30 Hz clock. **Lock FPS** (30, 60 or
+Unlocked; 30 by default on Old 3DS and 60 on New 3DS) chooses whether each
+update also shows an interpolated image. This is not a claim of sustained
+60 FPS on either console model; see [compatibility and evidence](docs/COMPATIBILITY.md)
+and the [automatic test mode](docs/TEST_MODE.md) used to measure it.
 
 ## Source and installation
 
@@ -102,8 +104,9 @@ in [diagnostics](docs/DIAGNOSTICS.md).
 | [Compatibility](docs/COMPATIBILITY.md) | Supported input, model profiles and validation limits. |
 | [SD data](docs/SD-DATA.md) | ROM, companion, saves, settings and recovery. |
 | [Building](docs/BUILDING.md) | Source pins, SDK, private inputs and packaging. |
-| [Architecture](docs/ARCHITECTURE.md) | Startup, ownership, adapters, workers and caches. |
+| [Architecture](docs/ARCHITECTURE.md) | Startup, ownership, adapters, workers, caches and the native renderer. |
 | [Testing](docs/TESTING.md) | ROM-free checks, ARM gates and emulator/hardware evidence. |
+| [Test mode](docs/TEST_MODE.md) | The automatic SELECT+START level tour and its reports. |
 | [Repository map](docs/REPOSITORY.md) | File placement and maintenance conventions. |
 | [Source provenance](docs/UPSTREAM.md) | Dependencies, immutable pins and notices. |
 | [Roadmap](docs/ROADMAP.md) | Remaining acceptance work. |

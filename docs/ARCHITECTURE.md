@@ -5,6 +5,15 @@ project-owned preparation scripts and adapters. It is a native ARM11/PICA200
 application; it does not run a DS emulator. The historical viewer/runtime
 under `source/ctr/` and `source/game_port/` is a separate development path.
 
+The [native renderer](../source/native_renderer/README.md) under
+`source/native_renderer/` draws the game from an immutable scene description
+instead of replaying DS GPU commands. It ships in the native-test CIA (title
+`000400000F536500`, BUILD 86 onward), built by the
+[native pipeline](../tools/native_renderer/pipeline/README.md); the 2D layers
+still pass through the original PPU and a bridge. The integrated package
+built by `tools/build_integrated_native.py` keeps the provider's renderer and
+remains the comparison route. Design notes: [NATIVE-RENDERER.md](NATIVE-RENDERER.md).
+
 ## Build flow
 
 ```mermaid
@@ -78,3 +87,38 @@ The diagnostic capture settles presentation work, records displayed buffers
 and exports readable mappings and VRAM. GPU, DSP and operating-system state
 are not an atomic whole-machine snapshot. See [Diagnostics](DIAGNOSTICS.md)
 and the detailed [adapter contracts](DEVELOPMENT.md).
+
+## Native renderer presentation
+
+The game keeps its 30 Hz update. After each update the game thread seals a
+scene capture (two stores alternate) and hands it to a render worker; when
+the worker is still busy the update shows no new image instead of queueing.
+
+| Console | Render worker | Audio mixer |
+| --- | --- | --- |
+| Old 3DS | Core 0, beside the game thread, one priority step below it | Core 1, capped at 30 % |
+| New 3DS | Core 2 | Core 1 |
+
+**Lock FPS** (pause menu, Display) chooses how many images an update shows:
+
+- **30**: one exact image per update. Default on the Old 3DS.
+- **60**: an interpolated image (part matrices and skin positions halfway
+  between two updates) and then the exact image, one LCD refresh apart.
+  Default on the New 3DS.
+- **Unlocked**: the same pair without waiting for the LCD.
+
+On the Old 3DS both images share the game's core. The exact image is
+recorded into a second command buffer while the GPU draws the interpolated
+one, then appended to the GPU queue; it reuses the interpolated image's
+uploads and draws only the screen it presents. A budget guard interpolates
+only when the update and both images fit in 92 % of the 33.4 ms period, and
+falls back to one image per update for 30–480 updates after a missed pair.
+Audio command batches that find the mixer busy are delivered after the image
+is handed over, so the game thread does not wait behind the mixer.
+
+Every cut that keeps an older path can be switched back on the console with
+`sdmc:/3ds/sm64ds/sin-recortes.txt` (and `audio-espera.txt` for audio), so
+the same build measures both. These paths are checked for identical output
+on the host and in Azahar; their console cost is measured by the
+[test mode](TEST_MODE.md), not assumed. Dated measurements and decisions:
+[NATIVE_60FPS_BUDGET.md](NATIVE_60FPS_BUDGET.md).

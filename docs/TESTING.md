@@ -54,6 +54,34 @@ objects; their filenames alone do not make them portable tests.
 Do not skip a required gate by fabricating its receipt. Retain whether a
 graphics comparison used an authored fixture or an actual captured state.
 
+## Native renderer checks
+
+The native renderer's host suites are part of the CTest run above (`native_*`).
+The exact cost cuts of BUILD 134–135 are each checked against a reference
+copy of the code they replace:
+
+| Check | Compares |
+| --- | --- |
+| `native_pica_state` | Register-delta writes against the unmodified Citro3D 1.7.1 `effect.c` and `buffers.c` over a PICA register model. |
+| `native_uniform_residency`, `native_sdk_uniforms_*` | Uniform residency against the upstream `uniforms.c`. |
+| `native_render_cuts` | Lighting cache, batch plans, skin upload and quad domains against the copying reference paths. |
+| `native_producer_cuts` | Material, pose, part and skin producers against verbatim copies of the BUILD 133 routines. |
+| `native_test_mode_script` | Test-mode script, zones, re-entries and state file. |
+
+Further gates need the local tools or checkout:
+
+```sh
+python3 tests/native_renderer/test_ppu_cost_cuts.py      # generated PPU vs BUILD 133 (needs the local checkout)
+DEVKITARM=/path/to/devkitARM python3 tools/test_native_producer_cuts_arm.py   # console compiler in Unicorn, six FPSCR modes
+DEVKITARM=/path/to/devkitARM python3 tools/test_native_renderer_math_arm.py
+```
+
+In the emulator, the [native pipeline](../tools/native_renderer/pipeline/README.md)
+runs one test-mode level per command and compares two runs screenshot by
+screenshot (`compare_screenshots.py`) or draw by draw (`compare_gpu_state.py`).
+The tour drives the same inputs every time, so an unchanged renderer gives
+identical screenshots; a difference is investigated, never accepted.
+
 ## Emulator scenarios
 
 Use a unique isolated Azahar profile and its own SD copy; preserve personal
@@ -81,6 +109,12 @@ symbolized against an exact code window and reproduced; the new allocation-
 forbidden production-path regression fails with the old helper and passes
 with the fixed one. Settings save and backup recovery were checked in
 isolated profiles. The normal Old title-to-file flow was also observed.
+
+Native-renderer BUILD 135 passed the host suites and the gates above; in
+Azahar (Old and New profiles, .3dsx and the 80 MiB CIA) its screenshots match
+BUILD 133 with Lock FPS 30, 60 and Unlocked, with the older paths switched
+back on, and while Lock FPS changes during play. Console timing is measured
+only from the [test mode](TEST_MODE.md) on a physical system.
 
 The [status journal](STATUS.md) records candidate-specific details. These
 checks do not establish completion, sustained FPS, audible quality,

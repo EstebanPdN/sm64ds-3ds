@@ -14,6 +14,10 @@ counter/subsystem trace context rather than only the lowest FPS number.
 | L + R + B | Partial capture without process RAM. |
 | L + R + X | Delete diagnostic dumps; use deliberately. |
 
+For repeatable performance evidence on the native-renderer test build, use
+the unattended [test mode](TEST_MODE.md) (SELECT+START): it writes the same
+script's reports, screenshots and GPU dumps for every level.
+
 Developer settings control detailed overlays and full dumps. Captures are
 written under `SD:/3ds/sm64ds/dumps/NNN-dump-YYYYMMDD-HHMMSS/` with sequence
 metadata. A full capture can be large and pauses normal work while writing.

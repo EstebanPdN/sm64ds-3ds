@@ -1,9 +1,22 @@
 # Remaining work
 
-BUILD 24 addresses the identified first-boot settings crash and makes local
-candidate identification visible. The next work is acceptance against the
+BUILD 24 addressed the identified first-boot settings crash and made local
+candidate identification visible. The native-renderer test line (BUILD 86 to
+135) now carries the testing effort. The next work is acceptance against the
 same executable and evidence-driven fixes, rather than assuming a build
 proves complete playability.
+
+## Native renderer, next console runs
+
+- Old 3DS test-mode tour with the default Lock FPS 30, then one with Lock FPS
+  60 chosen in the pause menu before SELECT+START; optionally one with
+  `sin-recortes.txt` to measure the exact cost cuts on the same console.
+- From the `== interpolacion ==` block, decide whether the 60 FPS pair fits
+  on the Old 3DS; if not, the next cut is the second image's batch planning.
+- Check HOME and lid close in the middle of an interpolated pair on hardware
+  (Azahar with HLE applets does not reproduce them).
+- Remaining models without a native bank (`modelos_faltantes`) and the 2D
+  layers that still pass through the PPU bridge.
 
 ## Before a public test package
 

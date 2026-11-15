@@ -4,6 +4,9 @@
   `reference-native.lock.json`. They are tracked byte-for-byte; local
   transformations run on generated copies. Its nested decompilation,
   extraction and build outputs remain ignored.
+- `citro3d-uniforms-1.7.1/`: four unmodified Citro3D 1.7.1 sources (zlib
+  notice included), compiled only as host oracles for the native renderer's
+  register and uniform tests. See its [README](citro3d-uniforms-1.7.1/README.md).
 - `libsm64-motion/`: the intact public libsm64 submodule, pinned by Git at
   `fd11813208272b4271d92bd92feb8f3fdbe61be5`. Initialize with a recursive
   clone or `git submodule update --init --recursive`.

@@ -7,6 +7,8 @@ checked preparation scripts. The backend itself lives under `third_party/`.
 | Directory | Role |
 | --- | --- |
 | `integrated_native/` | Maintained ROM-only boot, UI, camera, movement, diagnostics and presentation adapters. |
+| `integrated_native/renderer/` | Game-side adapters of the native renderer: scene capture, render worker, Lock FPS and the test mode. |
+| `native_renderer/` | Native Citro3D renderer: scene contracts, GPU backend, assets, lighting, batching and screen composition. See its [README](native_renderer/README.md). |
 | `movement_lab/` | Independent DS-world/N64-controller laboratory. |
 | `core/` | Shared parsers, geometry, models and fixed math used by host checks and earlier runtime work. |
 | `ctr/` | Historical viewer/runtime frontend and native platform adapters. |

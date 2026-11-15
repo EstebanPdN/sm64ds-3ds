@@ -11,7 +11,8 @@ configuration and `cmake/IntegratedHostTests.cmake`.
 | `options_camera/` | C-stick, stylus and runtime camera handoff. The Python pixel gate also needs its declared art fixtures and Pillow. |
 | `options_display/` | Display plans, title backdrop and presentation ownership. |
 | `movement_lab/` | Buttons, jump/session continuity, lifetime, DS bridge and platform/collision contacts. |
-| `integrated_audio_save/` | Gain ramp, queue metrics, boot allocation, bounded settings and failure-injected storage. |
+| `integrated_audio_save/` | Gain ramp, queue metrics, boot allocation, bounded settings, mixer lock handoff and failure-injected storage. |
+| `native_renderer/` | Native renderer contracts, asset banks, lighting, batching, exact PICA state and uniform residency, interpolation, producers and the test-mode script (`native_*` in CTest). `test_ppu_cost_cuts.py` compares the generated PPU with BUILD 133 and needs the local checkout; `run_*_arm.py` and `*_lab.cpp` need devkitARM and private catalogs. |
 | `native_benchmark/` | Scenario marker/model contracts. |
 | `test_build_tools.py` | SDK resolution, source freeze, candidate closure, BUILD reservation and unsupported optimized-Python rejection. |
 | `test_integrated_vm.py`, `test_read_mapped_capture.py` | Authored process-capture reader bounds. |

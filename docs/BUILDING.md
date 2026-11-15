@@ -122,3 +122,18 @@ upload in this repository's CI.
 For isolated Azahar acquisition and scenario prerequisites, use
 `tools/run_integrated_native.py --help` and [Testing](TESTING.md). Never
 describe a successful build or emulator run as physical-device validation.
+
+## 6. Native-renderer test candidates
+
+The native-test CIA (title `000400000F536500`) is built from a generated
+checkout of the integrated source under `build/native-renderer/`. Its
+one-time setup, the build and comparison commands and the private delivery
+step are in the [native pipeline guide](../tools/native_renderer/pipeline/README.md):
+
+```sh
+export DEVKITPRO=/path/to/devkitpro
+zsh build/native-renderer/playable-r1/build_playable.sh N          # N above the reserved counter
+python3 tools/package_native_renderer_hardware.py N SESSION        # CIA from a tested Azahar session
+```
+
+Both lines share the BUILD counter in `build_version.hpp`.
