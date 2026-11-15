@@ -11,6 +11,12 @@ from prepare_integrated_native_renderer import ROOT,ANCHOR,prepare,runtime_patch
 
 
 class GamePreparerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # The preparer only writes inside build/; a clean checkout has no
+        # build/native-renderer yet, and every case makes its folders there.
+        (ROOT/'build/native-renderer').mkdir(parents=True,exist_ok=True)
+
     def test_native_deadlines_survive_slow_render_cycles(self):
         vendor=ROOT/'third_party/sm64ds-3ds/port/platform/3ds'
         clock,cadence=fixed_cadence_patch((vendor/'observed_cycle_clock.h').read_text(),(vendor/'observed_cadence.cpp').read_text())
