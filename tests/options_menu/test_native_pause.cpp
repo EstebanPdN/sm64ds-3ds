@@ -166,7 +166,7 @@ int main(){
   assert(!std::strcmp(m.label(2),"Lock FPS"));
   key(m,128);key(m,128);assert(m.selected()==2);m.value(2,value,sizeof value);assert(!std::strcmp(value,"30"));
   key(m,16);assert(m.settings().fps_lock==kFpsLock60);m.value(2,value,sizeof value);assert(!std::strcmp(value,"60"));
-  key(m,16);assert(m.settings().fps_lock==kFpsLockOff);m.value(2,value,sizeof value);assert(!std::strcmp(value,"Off"));
+  key(m,16);assert(m.settings().fps_lock==kFpsLockOff);m.value(2,value,sizeof value);assert(!std::strcmp(value,"Unlocked"));
   key(m,32);assert(m.settings().fps_lock==kFpsLock60);key(m,32);key(m,32);assert(m.settings().fps_lock==kFpsLockOff);
   m.update(ds({0,true,200,int((36+88+18)*4/5)}));assert(m.settings().fps_lock==kFpsLock30);
   key(m,2);key(m,2);assert(m.finished()&&!m.accepted()&&m.settings()==lock);

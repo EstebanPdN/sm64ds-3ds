@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "rom_sha1": "1367529f2cb23e76ef295cb1727333ae8f0a6cd7",
+  "first_bank": 4100,
+  "layouts": [
+    1,
+    3
+  ],
+  "languages": [
+    {
+      "name": "default",
+      "mask": 3,
+      "index": null
+    },
+    {
+      "name": "fra",
+      "mask": 4,
+      "index": 2
+    },
+    {
+      "name": "ger",
+      "mask": 8,
+      "index": 3
+    },
+    {
+      "name": "spa",
+      "mask": 16,
+      "index": 4
+    },
+    {
+      "name": "ita",
+      "mask": 32,
+      "index": 5
+    }
+  ],
+  "tables": {
+    "characters": {
+      "address": 34438696,
+      "count": 4
+    },
+    "palettes": {
+      "address": 34438712,
+      "count": 6
+    },
+    "cells": {
+      "address": 34438736,
+      "count": 6
+    }
+  },
+  "evidence": [
+    {
+      "source": "src/func_ov007_020b6d40.c",
+      "sha256": "2b994bff7f9c3d377bcff72d9d873879bd130418452023f9f0c3bc940f01471e"
+    },
+    {
+      "source": "src/func_ov007_020ade58.c",
+      "sha256": "448d71155a86360935536cec663c0054fdd3e7c301d03bbe131420285a0c1283"
+    },
+    {
+      "source": "src/func_ov007_020bcba8.c",
+      "sha256": "abccd6357504661eaf3356dabbf2a86e2c623a0a4bfa8325e39b5543d73a37ce"
+    },
+    {
+      "source": "src/func_ov007_020bcdb8.cpp",
+      "sha256": "6cb6139c59189b29830ae71aab954a4a29cb095b6a9d6c6221d0d7860df04b37"
+    },
+    {
+      "source": "src/func_ov007_020c33d0.cpp",
+      "sha256": "619db14cd247aad34bcab27db4580ce4c92de0683a26835bc2aa47d13ed77f40"
+    },
+    {
+      "source": "src/func_ov007_020c32e8.cpp",
+      "sha256": "55b203e3359d5950ee6bd316f98045cc91999d9b3d83cffea3a53457d505d645"
+    },
+    {
+      "source": "src/func_ov007_020b3f20.c",
+      "sha256": "01f93067620ab87d5f76e16799573a7dbb5292b4e9174006c77918601e18c927"
+    },
+    {
+      "source": "src/func_ov007_020c0eb0.c",
+      "sha256": "9d0be8c45da70ec3fc2e269e17792eaec0913d714aac961da9737fe8e7dbbfeb"
+    }
+  ],
+  "scope": "All original menu OBJ cells; layout/engine/language-specific native assets. Backgrounds, effects and live routing require separate acceptance."
+}

@@ -20,6 +20,8 @@ struct Profile {
     std::size_t decoded_textures; // decoded DS textures (heap)
     std::size_t level_preload;  // star select preload (heap)
     int worker_core;            // presentation worker core (fallback: core 1)
+    unsigned presentation_divisor; // original display events: Old 2, New 1
+    bool antialias;             // New: 800x240 geometry downsampled to the LCD
 };
 
 constexpr uint32_t large_memory_threshold = 100u << 20;
@@ -30,10 +32,12 @@ constexpr Profile make(bool new_model, uint32_t app_memory) {
             large ? std::size_t(12) << 20 : std::size_t(8) << 20,
             large ? std::size_t(16) << 20 : std::size_t(8) << 20,
             large ? std::size_t(8) << 20 : std::size_t(3) << 20,
-            new_model ? 2 : 1};
+            new_model ? 2 : 1,new_model?1u:2u,new_model};
 }
 
 static_assert(make(false, 80u << 20).gpu_textures == 8u << 20, "Old keeps the tested budgets");
+static_assert(make(false,80u<<20).presentation_divisor==2&&!make(false,80u<<20).antialias,"Old: 30 FPS without supersampling");
+static_assert(make(true,124u<<20).presentation_divisor==1&&make(true,124u<<20).antialias,"New: 60 FPS with supersampling");
 static_assert(make(false, 124u << 20).decoded_textures == 8u << 20, "only a New 3DS uses the large budgets");
 static_assert(make(true, 80u << 20).level_preload == 3u << 20 && make(true, 80u << 20).worker_core == 2,
               "New 3DS in a small mode: Old memory budgets, its own cores");

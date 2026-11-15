@@ -5,7 +5,9 @@ The 96 MB mode leaves the SYSTEM region 12 MB; a loaded HOME Menu needs about
 28 MB. Savings, without changing game behaviour:
   - DS VRAM: map only the windows reachable from DS register fields instead
     of one flat 9 MiB block (falls back to the flat block if mapping fails).
-  - Linear heap: 20 MiB (castle peak use 11.1 MiB; GPU/DSP buffers only).
+  - Linear heap: 16 MiB (BUILD118; fresh native renderer peak 7.0 MiB on an
+    Old 3DS in the title menus, 6.2 MiB in levels). The libc heap gets the 4 MiB:
+    the castle pause exhausted it on hardware in BUILD114.
 """
 from prepare_integrated_native_pause import GeneratedTree
 from prepare_integrated_profiling import once
@@ -82,9 +84,10 @@ def prepare(output):
     name = 'port/platform/3ds/game_entry.cpp'
     text = tree.read_text(name)
     text = once(text, 'u32 __ctru_linear_heap_size=24*1024*1024;',
-                '// Old 3DS 80 MB mode (HOME Menu needs the SYSTEM region): castle peak\n'
-                '// linear use is 11.1 MiB, so 20 MiB keeps margin for heavier courses.\n'
-                'u32 __ctru_linear_heap_size=20*1024*1024;')
+                '// Old 3DS 80 MB mode (HOME Menu needs the SYSTEM region). The fresh\n'
+                '// native renderer peaks at 7.0 MiB linear (title menus, hardware) and\n'
+                '// 6.2 MiB in levels; the libc heap needs the rest (BUILD118).\n'
+                'u32 __ctru_linear_heap_size=16*1024*1024;')
     tree.write_text(name, text)
     tree.commit()
     return ['port/ntr/io.cpp', 'port/platform/3ds/game_entry.cpp']

@@ -248,7 +248,8 @@ inline bool write_range(const char* path,uint32_t address,uint32_t bytes,unsigne
     return w.close();
 }
 // Full process address space (SM64VM1 v2), plain device memory included.
-inline bool write_memory(const char* path,Header& header,uint64_t& total){
+inline bool write_memory(const char* path,Header& header,uint64_t& total,bool include_devices=true){
+    header.non_atomic_devices=include_devices?1u:0u;
     auto w=make_writer();
     if(!w.open(path))return false;
     bool ok=w.write(&header,sizeof header);
@@ -261,8 +262,13 @@ inline bool write_memory(const char* path,Header& header,uint64_t& total){
         const uint64_t limit=end<header.scan_end?end:header.scan_end;
         Region region{uint32_t(address),uint32_t(limit-address),memory.perm,memory.state,0,0};
         const unsigned state=memory.state&0xff;
-        if(!(memory.perm&MEMPERM_READ))region.reason=1;
-        else if(state==MEMSTATE_IO&&plain_device_memory(region.address,region.size)){
+        // CIA maps VRAM as static read-only memory, not necessarily MEMSTATE_IO.
+        // Exclude physical windows by address too, including a partial overlap.
+        const bool device_window=(address<0x1F600000u&&limit>0x1F000000u)||
+                                 (address<0x1FF80000u&&limit>0x1FF00000u);
+        if(!include_devices&&device_window)region.reason=2;
+        else if(!(memory.perm&MEMPERM_READ))region.reason=1;
+        else if(state==MEMSTATE_IO&&include_devices&&plain_device_memory(region.address,region.size)){
             if(total+region.size>uint64_t(header.scan_end)){region.reason=3;ok=false;}
             else {region.reason=region_device_payload;region.payload_bytes=region.size;total+=region.size;}
         }

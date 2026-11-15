@@ -26,10 +26,10 @@ def digest(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 def workspace_snapshot(root=ROOT):
     files=[root/'CMakeLists.txt',root/'reference-native.lock.json']
-    for name in ('source/integrated_native','tools','tests','cmake'):
+    for name in ('source/integrated_native','source/native_renderer','tools','tests','cmake'):
         files.extend(p for p in (root/name).rglob('*') if p.is_file()
                      and '__pycache__' not in p.parts and p.suffix in
-                     {'.cpp','.c','.h','.hpp','.inc','.py','.cmake','.json'})
+                     {'.cpp','.c','.h','.hpp','.inc','.py','.cmake','.json','.pica'})
     return {p.relative_to(root).as_posix():digest(p) for p in sorted(files) if p.is_file()}
 
 
@@ -189,6 +189,8 @@ def main():
         check_vertex_inputs()
         from test_integrated_mesh_uniforms import check as check_mesh_uniforms
         check_mesh_uniforms()
+        from test_integrated_gpu_geometry import check as check_gpu_geometry
+        check_gpu_geometry()
         run([python,ROOT/'tools/test_integrated_material_cache.py'],
             logfile=OUT/'material-cache-host-test.log')
         from test_integrated_raycast import check as check_raycast
@@ -348,10 +350,11 @@ def main():
                      'tools/prepare_integrated_profiling.py','tools/prepare_integrated_runtime_costs.py','tests/test_profile_probe.cpp','tests/test_integrated_runtime_costs.py',
                      'tools/devkitpro_tools.py','tools/test_integrated_ppu_synthetic.py',
                      'tools/prepare_integrated_toolchain.py',
-                     'tools/prepare_integrated_audio.py','tools/prepare_integrated_save.py',
+                     'tools/prepare_integrated_audio.py','tools/prepare_integrated_mixer.py','tools/test_integrated_mixer_armv6.py','tools/prepare_integrated_save.py',
                      'tests/test_overlay_publication.cpp','tests/test_profile_probe.cpp','tests/test_build_tools.py','tools/movement_lab/port_source.py',
                      'CMakeLists.txt','cmake/IntegratedHostTests.cmake',
                      'tools/prepare_integrated_vertex_inputs.py','tools/test_integrated_vertex_inputs.py',
+                     'tools/prepare_integrated_gpu_geometry.py','tools/test_integrated_gpu_geometry.py',
                      'tools/prepare_integrated_mesh_uniforms.py','tools/test_integrated_mesh_uniforms.py','source/integrated_native/mesh_uniform_cache.hpp',
                      'tools/prepare_integrated_render60.py','tools/prepare_integrated_movement.py','tools/movement_lab/build_core.py','tools/prepare_integrated_camera.py',
                      'tools/prepare_integrated_collision.py','tools/test_integrated_raycast.py','source/integrated_native/movement/raycast_arithmetic.hpp','tests/movement_lab/test_raycast_arithmetic.cpp',

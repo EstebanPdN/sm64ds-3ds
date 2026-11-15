@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -12,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from devkitpro_tools import arm_tool, sdk_tool
-from prepare_integrated_toolchain import prepare
+from prepare_integrated_toolchain import prepare,response_link
 from build_version import reserve
 from build_integrated_native import digest, verify_closed_candidate, workspace_snapshot, require_unchanged_snapshot
 
@@ -98,13 +99,29 @@ class BuildToolsTests(unittest.TestCase):
             for name in names:
                 shutil.copyfile(ROOT / 'third_party/sm64ds-3ds/build3ds' / name, root / 'build3ds' / name)
             pristine = {name: (root / 'build3ds' / name).read_bytes() for name in names}
-            self.assertEqual(len(prepare(root)), 3)
+            self.assertEqual(len(prepare(root)), 4)
             for name in names:
                 self.assertNotIn('/opt/devkitpro', (root / 'build3ds' / name).read_text())
             for name in names:(root / 'build3ds' / name).write_bytes(pristine[name])
             bad = root / 'build3ds/build_menu_probe.py';bad.write_text('changed contract\n')
             with self.assertRaises(ValueError):prepare(root)
             self.assertEqual((root / 'build3ds/build_game.py').read_bytes(), pristine['build_game.py'])
+
+    def test_final_link_response_keeps_spaces_quotes_and_literal_shell_characters(self):
+        compiler=shutil.which('clang++') or shutil.which('c++')
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory(prefix='link, response ') as tmp:
+            out=Path(tmp);source=out/"literal 'quote' $value `tick`.cpp";binary=out/'program with spaces'
+            source.write_text('int main(){return 0;}\n')
+            object_file=out/"object 'quote' $value `tick`.o"
+            subprocess.run([compiler,'-c',str(source),'-o',str(object_file)],check=True)
+            command=[compiler,str(object_file),'-o',str(binary)]
+            text=response_link('result=subprocess.run(command,cwd=out,capture_output=True,text=True)')
+            values=dict(command=command,out=out,name='fixture',shlex=shlex,subprocess=subprocess)
+            exec(text,values)
+            self.assertEqual(values['result'].returncode,0,values['result'].stderr)
+            self.assertEqual(subprocess.run([str(binary)]).returncode,0)
+            with self.assertRaises(ValueError):response_link(text)
 
     def test_optimized_python_cannot_disable_candidate_assertions(self):
         result = subprocess.run([sys.executable, '-O', str(ROOT / 'tools/build_integrated_native.py'), '--help'],

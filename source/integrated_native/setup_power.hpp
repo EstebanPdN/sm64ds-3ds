@@ -47,6 +47,10 @@ public:
 
 #ifdef __3DS__
 #include <3ds.h>
+// BUILD127: a SELECT+START test run in progress (test_mode.cpp). Its levels
+// relaunch unattended, often with the lid closed; it owns sleep, backlights
+// and the notification LED for the whole run.
+extern "C" int sm64ds_test_mode_pending(void) __attribute__((weak));
 namespace setup_power {
 struct CtrService {
     bool sleep_allowed()const{return aptIsSleepAllowed();}
@@ -79,7 +83,10 @@ public:
     ~Scope(){active_guard=prior_;}
     // Called only after all files and audio are ready. Keep the light notice
     // owned until reopening, so no detached thread or lingering LED is needed.
+    // A test run never waits for the lid nor blinks: every tour level boots
+    // through here and must continue with the console closed.
     bool completed() {
+        if(sm64ds_test_mode_pending&&sm64ds_test_mode_pending())return !aptShouldClose();
         guard_.completed();
         while(!guard_.refresh()){
             if(!aptMainLoop())return false;

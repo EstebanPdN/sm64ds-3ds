@@ -20,6 +20,7 @@ import struct
 
 
 TITLE_ID = 0x000400000F536400
+NATIVE_TEST_TITLE_ID = 0x000400000F536500
 PREVIEW_TITLE_ID = 0x000400000F646D00
 FS_ACCESS = 0x8084  # DirectSdmc, DirectSdmcWrite, CategoryFileSystemTool.
 PAGE = 4096
@@ -160,9 +161,9 @@ def code_identity(payload, ex, raw_elf):
                 bss_bytes=bss, segments=segments)
 
 
-def profile(ex):
+def profile(ex, title_id=TITLE_ID):
     require(len(ex) == 0x400, 'Truncated extended header')
-    require(struct.unpack_from('<Q', ex, 0x200)[0] == TITLE_ID,
+    require(struct.unpack_from('<Q', ex, 0x200)[0] == title_id,
             'Exheader title ID mismatch')
     require(ex[0x0d] & 2, 'CIA is not marked for SD')
     # New 3DS profile (console_profile.hpp): flag1 = L2 cache | 804 MHz,
@@ -174,6 +175,11 @@ def profile(ex):
     require((ideal, affinity, mode) == (0, 3, 3),
             'Expected ideal core 0, affinity 0/1, Old 80MB')
     require(u32(ex, 0x1c) == 0x100000, 'Expected 1 MiB stack')
+    # Resource limit descriptor 0 (rsf MaxCpu). PM grants the application
+    # (value & 0x7F) percent of core 1; bit 7 is the multi-thread preemption
+    # mode. BUILD124's Old 3DS render worker asks for 80 (0x9E allowed 30).
+    max_cpu = struct.unpack_from('<H', ex, 0x210)[0]
+    require(max_cpu == 0xD0, 'Expected MaxCpu 0xD0 (core 1 up to 80%, multi-thread mode)')
     fs = int.from_bytes(ex[0x248:0x24f], 'little')
     # Title access archive 0x2345678A accepts any one bit of 0x1005;
     # CategoryFileSystemTool is the one selected bit for the local DSP reader.
@@ -220,6 +226,7 @@ def profile(ex):
     return dict(system_mode='80MB', system_mode_value=mode, system_mode_ext='124MB',
                 cpu_speed='804MHz', l2_cache=True, memory_type='Application',
                 ideal_processor=ideal, affinity_mask=affinity, stack_bytes=u32(ex, 0x1c),
+                max_cpu=f'0x{max_cpu:x}', core1_cpu_percent_max=max_cpu & 0x7f,
                 priority=ex[0x20f], filesystem_access=f'0x{fs:x}', services=services,
                 filesystem_permissions=['DirectSdmc', 'DirectSdmcWrite', 'CategoryFileSystemTool'],
                 arm9_access='0x300', raw_nand_mount_requested=False,
@@ -228,7 +235,8 @@ def profile(ex):
                 kernel_descriptors=[f'{word:08x}' for word in descriptors])
 
 
-def cia_parts(data):
+def cia_parts(data, *, native_test=False):
+    title_id = NATIVE_TEST_TITLE_ID if native_test else TITLE_ID
     require(len(data) >= 0x2020, 'Truncated CIA header')
     head, kind, version, cert_n, ticket_n, tmd_n, meta_n, content_n = struct.unpack_from('<IHHIIIIQ', data)
     require((head, kind, version) == (0x2020, 0, 0), 'Unexpected CIA header')
@@ -242,8 +250,8 @@ def cia_parts(data):
     require(len(ticket) >= 0x1e4 and len(tmd) == 0xb34, 'Unexpected Ticket/TMD size')
     require(struct.unpack_from('>I', ticket)[0] == 0x10004
             and struct.unpack_from('>I', tmd)[0] == 0x10004, 'Unexpected signature type')
-    require(struct.unpack_from('>Q', ticket, 0x1dc)[0] == TITLE_ID
-            and struct.unpack_from('>Q', tmd, 0x18c)[0] == TITLE_ID, 'CIA title ID mismatch')
+    require(struct.unpack_from('>Q', ticket, 0x1dc)[0] == title_id
+            and struct.unpack_from('>Q', tmd, 0x18c)[0] == title_id, 'CIA title ID mismatch')
     require(struct.unpack_from('>HH', tmd, 0x1de) == (1, 0), 'Expected one boot content')
     require(sha(tmd[0x204:0xb04]) == tmd[0x1e4:0x204].hex(), 'TMD index hash mismatch')
     require(struct.unpack_from('>HH', tmd, 0x204) == (0, 1), 'TMD index mismatch')
@@ -256,13 +264,20 @@ def cia_parts(data):
     require(cxi[0x18e] <= 8, 'Unsupported NCCH media unit')
     unit = 0x200 << cxi[0x18e]
     require(u32(cxi, 0x104) * unit == len(cxi), 'NCCH size mismatch')
-    require(struct.unpack_from('<Q', cxi, 0x108)[0] == TITLE_ID
-            and struct.unpack_from('<Q', cxi, 0x118)[0] == TITLE_ID, 'NCCH title ID mismatch')
+    require(struct.unpack_from('<Q', cxi, 0x108)[0] == title_id
+            and struct.unpack_from('<Q', cxi, 0x118)[0] == title_id, 'NCCH title ID mismatch')
     require(cxi[0x18c] == 1 and cxi[0x18f] & 4, 'Expected unencrypted CTR NCCH')
     require(u32(cxi, 0x180) == 0x400, 'Unexpected exheader size')
     ex = cxi[0x200:0x600]
     require(sha(ex) == cxi[0x160:0x180].hex(), 'Exheader hash mismatch')
-    require(u32(cxi, 0x1b0) == u32(cxi, 0x1b4) == 0, 'Unexpected RomFS assets')
+    if native_test:
+        romfs = span(cxi, u32(cxi, 0x1b0) * unit, u32(cxi, 0x1b4) * unit, 'Native RomFS')
+        require(romfs[:4] == b'IVFC' and 0 < u32(cxi, 0x1b8) * unit <= len(romfs),
+                'Missing native-test RomFS or invalid hash span')
+        require(sha(romfs[:u32(cxi, 0x1b8) * unit]) == cxi[0x1e0:0x200].hex(),
+                'Native RomFS header hash mismatch')
+    else:
+        require(u32(cxi, 0x1b0) == u32(cxi, 0x1b4) == 0, 'Unexpected RomFS assets')
     logo_at, logo_n = u32(cxi, 0x198) * unit, u32(cxi, 0x19c) * unit
     if logo_n:
         require(sha(span(cxi, logo_at, logo_n, 'Logo')) == cxi[0x130:0x150].hex(),
@@ -295,23 +310,24 @@ def cia_parts(data):
                            title_version=struct.unpack_from('>H', tmd, 0x1dc)[0])
 
 
-def verify(cia, elf, expected_elf_sha256=None):
+def verify(cia, elf, expected_elf_sha256=None, *, native_test=False):
     raw, raw_elf = Path(cia).read_bytes(), Path(elf).read_bytes()
     elf_sha = sha(raw_elf)
     if expected_elf_sha256 is not None:
         require(re.fullmatch('[0-9a-fA-F]{64}', expected_elf_sha256) is not None,
                 'Expected ELF SHA-256 must have 64 hexadecimal characters')
         require(elf_sha == expected_elf_sha256.lower(), 'ELF differs from frozen expected hash')
-    ex, files, content = cia_parts(raw)
+    ex, files, content = cia_parts(raw, native_test=native_test)
+    title_id = NATIVE_TEST_TITLE_ID if native_test else TITLE_ID
     return dict(status='integrated_cia_structurally_verified_exact_ELF',
                 cia=str(Path(cia).resolve()), bytes=len(raw), sha256=sha(raw),
                 elf=str(Path(elf).resolve()), ELF_sha256=elf_sha,
                 verifier_sha256=sha(Path(__file__).read_bytes()),
-                title_id=f'{TITLE_ID:016X}', distinct_from_preview=TITLE_ID != PREVIEW_TITLE_ID,
-                profile=profile(ex), code=code_identity(files['.code'], ex, raw_elf),
+                title_id=f'{title_id:016X}', distinct_from_preview=title_id != PREVIEW_TITLE_ID,
+                profile=profile(ex, title_id), code=code_identity(files['.code'], ex, raw_elf),
                 exefs={name: dict(bytes=len(payload), sha256=sha(payload))
                        for name, payload in files.items()}, **content,
-                romfs_present=False, rom_bytes_read=False, emulator_launched=False,
+                romfs_present=native_test, rom_bytes_read=False, emulator_launched=False,
                 physical_installation_tested=False, source_layout=SOURCE,
                 title_content_permission_source=FS_SOURCE,
                 limits=['Integrity and requested packaging policy only; retail signatures not verified.',
@@ -324,10 +340,12 @@ def main():
     parser.add_argument('cia', type=Path)
     parser.add_argument('elf', type=Path)
     parser.add_argument('--expected-elf-sha256')
+    parser.add_argument('--native-test', action='store_true',
+                        help='Verify native-renderer test title F5365 with RomFS; retains the same Old/New memory and access policy')
     parser.add_argument('--report', type=Path, help='New report path; existing files are never replaced')
     args = parser.parse_args()
     try:
-        result = verify(args.cia, args.elf, args.expected_elf_sha256)
+        result = verify(args.cia, args.elf, args.expected_elf_sha256, native_test=args.native_test)
         output = json.dumps(result, indent=2) + '\n'
         if args.report:
             with args.report.open('x') as stream:

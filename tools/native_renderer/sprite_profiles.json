@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "model": "data/DSMT/EUR/texBank_E.bmd",
+      "handle": 631,
+      "paired_entries": 11,
+      "evidence": [
+        {
+          "source": "src/func_ov007_020b697c.c",
+          "sha256": "66954644cc1e42f9b6ca7d1da2f48002a098d040e36378d4a85e09c41ac5594e"
+        },
+        {
+          "source": "src/func_ov007_020b2308.c",
+          "sha256": "c7c15dd1ab6eac23d95b53cbe0001683efd3dc1968c2913c1828cb9af1f72e26"
+        },
+        {
+          "source": "src/func_ov007_020c162c.c",
+          "sha256": "c19033e3e04b1a212a3c8f01ff7305b5db6f958f6852b8648a9f1006726884c2"
+        },
+        {
+          "source": "src/func_ov007_020bd1c0.c",
+          "sha256": "f3e26be1f6af464f9e9d421a5e035dc2f0b3da4b163344d97d4e2647652db11d"
+        },
+        {
+          "source": "src/func_ov007_020b22e0.c",
+          "sha256": "c072c8faa0af3f2cf45c6aa6323ca049585f825a528494b9b4dbbf4036901df4"
+        },
+        {
+          "source": "src/func_ov007_020b65e0.c",
+          "sha256": "97bec23b4dc5721ee6bbc3809d0c85395fad16ad4ec31713b01c4fb64722048e"
+        },
+        {
+          "source": "src/func_ov007_020c1620.c",
+          "sha256": "6e5ba1eb35fc12c17c974d9414a0e1a31421b4b7582d47b1c7bfb85b5fe9bde7"
+        }
+      ]
+    },
+    {
+      "model": "data/DSMT/EUR/texBank_F.bmd",
+      "handle": 632,
+      "paired_entries": 2,
+      "evidence": [
+        {
+          "source": "src/func_ov007_020b697c.c",
+          "sha256": "66954644cc1e42f9b6ca7d1da2f48002a098d040e36378d4a85e09c41ac5594e"
+        },
+        {
+          "source": "src/func_ov007_020b2308.c",
+          "sha256": "c7c15dd1ab6eac23d95b53cbe0001683efd3dc1968c2913c1828cb9af1f72e26"
+        },
+        {
+          "source": "src/func_ov007_020c162c.c",
+          "sha256": "c19033e3e04b1a212a3c8f01ff7305b5db6f958f6852b8648a9f1006726884c2"
+        },
+        {
+          "source": "src/func_ov007_020bd1c0.c",
+          "sha256": "f3e26be1f6af464f9e9d421a5e035dc2f0b3da4b163344d97d4e2647652db11d"
+        },
+        {
+          "source": "src/func_ov007_020b22e0.c",
+          "sha256": "c072c8faa0af3f2cf45c6aa6323ca049585f825a528494b9b4dbbf4036901df4"
+        },
+        {
+          "source": "src/func_ov007_020b65e0.c",
+          "sha256": "97bec23b4dc5721ee6bbc3809d0c85395fad16ad4ec31713b01c4fb64722048e"
+        },
+        {
+          "source": "src/func_ov007_020c1620.c",
+          "sha256": "6e5ba1eb35fc12c17c974d9414a0e1a31421b4b7582d47b1c7bfb85b5fe9bde7"
+        }
+      ]
+    },
+    {
+      "model": "data/DSMT/EUR/texBank_G.bmd",
+      "handle": 633,
+      "paired_entries": 2,
+      "evidence": [
+        {
+          "source": "src/func_ov007_020b697c.c",
+          "sha256": "66954644cc1e42f9b6ca7d1da2f48002a098d040e36378d4a85e09c41ac5594e"
+        },
+        {
+          "source": "src/func_ov007_020b2308.c",
+          "sha256": "c7c15dd1ab6eac23d95b53cbe0001683efd3dc1968c2913c1828cb9af1f72e26"
+        },
+        {
+          "source": "src/func_ov007_020c162c.c",
+          "sha256": "c19033e3e04b1a212a3c8f01ff7305b5db6f958f6852b8648a9f1006726884c2"
+        },
+        {
+          "source": "src/func_ov007_020bd1c0.c",
+          "sha256": "f3e26be1f6af464f9e9d421a5e035dc2f0b3da4b163344d97d4e2647652db11d"
+        },
+        {
+          "source": "src/func_ov007_020b22e0.c",
+          "sha256": "c072c8faa0af3f2cf45c6aa6323ca049585f825a528494b9b4dbbf4036901df4"
+        },
+        {
+          "source": "src/func_ov007_020b65e0.c",
+          "sha256": "97bec23b4dc5721ee6bbc3809d0c85395fad16ad4ec31713b01c4fb64722048e"
+        },
+        {
+          "source": "src/func_ov007_020c1620.c",
+          "sha256": "6e5ba1eb35fc12c17c974d9414a0e1a31421b4b7582d47b1c7bfb85b5fe9bde7"
+        }
+      ]
+    },
+    {
+      "model": "data/DSMT/EUR/texBank_I.bmd",
+      "handle": 634,
+      "paired_entries": 2,
+      "evidence": [
+        {
+          "source": "src/func_ov007_020b697c.c",
+          "sha256": "66954644cc1e42f9b6ca7d1da2f48002a098d040e36378d4a85e09c41ac5594e"
+        },
+        {
+          "source": "src/func_ov007_020b2308.c",
+          "sha256": "c7c15dd1ab6eac23d95b53cbe0001683efd3dc1968c2913c1828cb9af1f72e26"
+        },
+        {
+          "source": "src/func_ov007_020c162c.c",
+          "sha256": "c19033e3e04b1a212a3c8f01ff7305b5db6f958f6852b8648a9f1006726884c2"
+        },
+        {
+          "source": "src/func_ov007_020bd1c0.c",
+          "sha256": "f3e26be1f6af464f9e9d421a5e035dc2f0b3da4b163344d97d4e2647652db11d"
+        },
+        {
+          "source": "src/func_ov007_020b22e0.c",
+          "sha256": "c072c8faa0af3f2cf45c6aa6323ca049585f825a528494b9b4dbbf4036901df4"
+        },
+        {
+          "source": "src/func_ov007_020b65e0.c",
+          "sha256": "97bec23b4dc5721ee6bbc3809d0c85395fad16ad4ec31713b01c4fb64722048e"
+        },
+        {
+          "source": "src/func_ov007_020c1620.c",
+          "sha256": "6e5ba1eb35fc12c17c974d9414a0e1a31421b4b7582d47b1c7bfb85b5fe9bde7"
+        }
+      ]
+    },
+    {
+      "model": "data/DSMT/EUR/texBank_S.bmd",
+      "handle": 635,
+      "paired_entries": 2,
+      "evidence": [
+        {
+          "source": "src/func_ov007_020b697c.c",
+          "sha256": "66954644cc1e42f9b6ca7d1da2f48002a098d040e36378d4a85e09c41ac5594e"
+        },
+        {
+          "source": "src/func_ov007_020b2308.c",
+          "sha256": "c7c15dd1ab6eac23d95b53cbe0001683efd3dc1968c2913c1828cb9af1f72e26"
+        },
+        {
+          "source": "src/func_ov007_020c162c.c",
+          "sha256": "c19033e3e04b1a212a3c8f01ff7305b5db6f958f6852b8648a9f1006726884c2"
+        },
+        {
+          "source": "src/func_ov007_020bd1c0.c",
+          "sha256": "f3e26be1f6af464f9e9d421a5e035dc2f0b3da4b163344d97d4e2647652db11d"
+        },
+        {
+          "source": "src/func_ov007_020b22e0.c",
+          "sha256": "c072c8faa0af3f2cf45c6aa6323ca049585f825a528494b9b4dbbf4036901df4"
+        },
+        {
+          "source": "src/func_ov007_020b65e0.c",
+          "sha256": "97bec23b4dc5721ee6bbc3809d0c85395fad16ad4ec31713b01c4fb64722048e"
+        },
+        {
+          "source": "src/func_ov007_020c1620.c",
+          "sha256": "6e5ba1eb35fc12c17c974d9414a0e1a31421b4b7582d47b1c7bfb85b5fe9bde7"
+        }
+      ]
+    }
+  ]
+}

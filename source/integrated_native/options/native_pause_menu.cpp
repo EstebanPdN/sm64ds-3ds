@@ -80,7 +80,7 @@ void Menu::value(unsigned i,char* out,unsigned cap)const{
  case Page::Controller:controller_options::value(settings_,i,out,cap);return;
  case Page::Display:{
   constexpr const char* modes[]={"Original","Wide","Stretch"};
-  constexpr const char* locks[]={"Off","30","60"};
+  constexpr const char* locks[]={"Unlocked","30","60"};
   text=i==0?(settings_.res3d==Res3d::Native?"Native":"Original"):i==1?modes[settings_.screen_mode%3]:locks[effective_fps_lock(settings_)%3];
   break;
  }

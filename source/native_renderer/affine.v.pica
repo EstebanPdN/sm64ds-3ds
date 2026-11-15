@@ -1,0 +1,28 @@
+; Unlit native sprites and ordinary-UV geometry. The object/camera transform
+; stays on PICA; no normal, fixed-point UV or lighting kernel is visited.
+.fvec mvp[4]
+.fvec uv_transform[2], material_tint
+.constf affine_unit(0.0, 1.0, 0.00392156862745, 0.0)
+.out clip position
+.out tint color
+.out uv texcoord0
+.in position v0
+.in texcoord v1
+.in colour v2
+.entry affine_main
+.proc affine_main
+    mov r0.xyz, position
+    mov r0.w, affine_unit.y
+    dp4 clip.x, mvp[0], r0
+    dp4 clip.y, mvp[1], r0
+    dp4 clip.z, mvp[2], r0
+    dp4 clip.w, mvp[3], r0
+    mov r0.xy, texcoord.xy
+    mov r0.z, affine_unit.y
+    dp3 uv.x, uv_transform[0], r0
+    dp3 uv.y, uv_transform[1], r0
+    mov uv.zw, affine_unit.xx
+    mul r0, affine_unit.zzzz, colour
+    mul tint, material_tint, r0
+    end
+.end

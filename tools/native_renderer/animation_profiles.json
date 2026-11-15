@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "model": "data/enemy/birikyu/birikyu_elec.bmd",
+      "model_handle": 691,
+      "animations": [
+        {"path": "data/enemy/birikyu/birikyu_elec.btp", "handle": 692}
+      ],
+      "evidence": [
+        {
+          "source": "src/actors/daBrq_c.cpp",
+          "sha256": "7f65075c951f4cc5307cddfcccd48c6632ea6347371c6af8ed4d47a929abad94",
+          "contract": "daBrq_c::InitResources prepares the BTP handle data_ov070_021235ec against model data_ov070_02123604."
+        },
+        {
+          "source": "src/__sinit_ov070_02122d80.cpp",
+          "sha256": "dd7299da77469c7bade749f8eda588679991a1aa3bd54f9d8614ca98c0dadbed",
+          "contract": "The initializer assigns model handle 0x2b3 and sequence handle 0x2b4; resolve both through original overlay-zero handle paths."
+        }
+      ]
+    }
+  ]
+}

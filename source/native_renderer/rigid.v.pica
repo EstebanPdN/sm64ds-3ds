@@ -1,0 +1,423 @@
+; Native rigid mesh: camera/object matrix only changes uniforms.
+; Colour is RGBA8. No DS command/state decoder or CPU vertex transform.
+.fvec mvp[4]
+.fvec uv_transform[2], material_tint
+.fvec integer_uv[16]
+.fvec light_normal[12], light_direction[4], light_colour[4], light_material[4], shininess[32]
+.ivec light_loop
+.bool use_lighting, has_lights, use_specular, use_shininess
+.bool use_toon
+.bool use_grey
+.bool use_normal_uv
+.bool use_fixed_uv
+.constf unit(0.0, 1.0, 0.00392156862745, 2.0)
+.constf split(256.0, 0.00390625, 16.0, 0.0625)
+.constf fraction(4096.0, 0.000244140625, 65536.0, 0.0000152587890625)
+.constf signed_offset(32768.0, 0.0, 0.0, 0.0)
+.constf normal_scale(32.0, 0.03125, 0.5, 16.0)
+.constf normal_weight(512.0, 16384.0, 0.25, 4.0)
+.constf light_scale(1024.0, 0.0009765625, 2048.0, 0.00048828125)
+.constf light_accum(16384.0, 0.00006103515625, 512.0, 0.001953125)
+.constf light_modes(31.0, 0.25, 8.0, 0.00392156862745)
+.constf light_lanes(0.0, 1.0, 2.0, 3.0)
+.constf normal_radix(64.0, 0.015625, 32.0, 0.03125)
+.constf light_word(64.0, 0.015625, 256.0, 0.00390625)
+.out clip position
+.out tint color
+.out uv texcoord0
+.in position v0
+.in texcoord v1
+.in colour v2
+.in normal v3
+.proc main
+    mov r0.xyz, position
+    mov r0.w, unit.y
+    dp4 clip.x, mvp[0], r0
+    dp4 clip.y, mvp[1], r0
+    dp4 clip.z, mvp[2], r0
+    dp4 clip.w, mvp[3], r0
+    ifu use_normal_uv
+        ; Signed10 normal = low5 + high5*32. Coefficient digits use base32.
+        mul r2.xyz, normal_scale.yyy, normal.xyz
+        flr r2.xyz, r2.xyz
+        mul r3.xyz, normal_scale.xxx, r2.xyz
+        add r3.xyz, normal.xyz, -r3.xyz
+        mov r4.xy, unit.xx
+        dp3 r5.x, integer_uv[0], r3
+        dp3 r5.y, integer_uv[1], r3
+        add r5.xy, r5.xy, r4.xy
+        mul r4.xy, normal_scale.yy, r5.xy
+        flr r4.xy, r4.xy
+        dp3 r5.x, integer_uv[2], r3
+        dp3 r5.y, integer_uv[3], r3
+        dp3 r6.x, integer_uv[0], r2
+        dp3 r6.y, integer_uv[1], r2
+        add r5.xy, r5.xy, r6.xy
+        add r5.xy, r5.xy, r4.xy
+        mul r4.xy, normal_scale.yy, r5.xy
+        flr r4.xy, r4.xy
+        dp3 r5.x, integer_uv[4], r3
+        dp3 r5.y, integer_uv[5], r3
+        dp3 r6.x, integer_uv[2], r2
+        dp3 r6.y, integer_uv[3], r2
+        add r5.xy, r5.xy, r6.xy
+        add r5.xy, r5.xy, r4.xy
+        mul r4.xy, normal_scale.yy, r5.xy
+        flr r4.xy, r4.xy
+        dp3 r5.x, integer_uv[6], r3
+        dp3 r5.y, integer_uv[7], r3
+        dp3 r6.x, integer_uv[4], r2
+        dp3 r6.y, integer_uv[5], r2
+        add r5.xy, r5.xy, r6.xy
+        add r5.xy, r5.xy, r4.xy
+        mul r4.xy, normal_scale.yy, r5.xy
+        flr r4.xy, r4.xy
+        dp3 r5.x, integer_uv[8], r3
+        dp3 r5.y, integer_uv[9], r3
+        dp3 r6.x, integer_uv[6], r2
+        dp3 r6.y, integer_uv[7], r2
+        add r5.xy, r5.xy, r6.xy
+        add r5.xy, r5.xy, r4.xy
+        mul r4.xy, normal_scale.yy, r5.xy
+        flr r4.xy, r4.xy
+        mul r6.xy, normal_scale.xx, r4.xy
+        add r5.xy, r5.xy, -r6.xy
+        mul r7.xy, normal_scale.zz, r5.xy
+        flr r7.xy, r7.xy
+        dp3 r5.x, integer_uv[10], r3
+        dp3 r5.y, integer_uv[11], r3
+        dp3 r6.x, integer_uv[8], r2
+        dp3 r6.y, integer_uv[9], r2
+        add r5.xy, r5.xy, r6.xy
+        add r5.xy, r5.xy, r4.xy
+        mul r4.xy, normal_scale.yy, r5.xy
+        flr r4.xy, r4.xy
+        mul r6.xy, normal_scale.xx, r4.xy
+        add r5.xy, r5.xy, -r6.xy
+        mad r7.xy, r5.xy, normal_scale.ww, r7.xy
+        dp3 r5.x, integer_uv[12], r3
+        dp3 r5.y, integer_uv[13], r3
+        dp3 r6.x, integer_uv[10], r2
+        dp3 r6.y, integer_uv[11], r2
+        add r5.xy, r5.xy, r6.xy
+        add r5.xy, r5.xy, r4.xy
+        mul r4.xy, normal_scale.yy, r5.xy
+        flr r4.xy, r4.xy
+        mul r6.xy, normal_scale.xx, r4.xy
+        add r5.xy, r5.xy, -r6.xy
+        mad r7.xy, r5.xy, normal_weight.xx, r7.xy
+        dp3 r5.x, integer_uv[12], r2
+        dp3 r5.y, integer_uv[13], r2
+        add r5.xy, r5.xy, r4.xy
+        mul r6.xy, normal_weight.zz, r5.xy
+        flr r6.xy, r6.xy
+        mul r6.xy, normal_weight.ww, r6.xy
+        add r5.xy, r5.xy, -r6.xy
+        mad r7.xy, r5.xy, normal_weight.yy, r7.xy
+        ; TEXCOORD overrides the retained generated coordinates immediately.
+        ; Source0/1 keeps NORMAL's dot; source2 keeps only the explicit raw UV.
+        sge r9.x, unit.yyyy, normal.wwww
+        mul r7.xy, r9.xx, r7.xy
+        add r9.y, unit.wwww, -normal.wwww
+        mul r9.y, r9.yyyy, normal.wwww
+        mul r8.xy, integer_uv[14].xy, texcoord.xy
+        mad r8.xy, r9.yy, integer_uv[15].xy, r8.xy
+        add r7.xy, r7.xy, r8.xy
+        add r8.xy, signed_offset.xx, r7.xy
+        mul r8.xy, fraction.ww, r8.xy
+        flr r8.xy, r8.xy
+        mul r8.xy, fraction.zz, r8.xy
+        add r7.xy, r7.xy, -r8.xy
+        mul uv.xy, integer_uv[14].zw, r7.xy
+    .else
+    ifu use_fixed_uv
+        ; Recover signed16 raw coordinates exactly from prepared power-of-two UVs.
+        mul r2.x, integer_uv[5].x, texcoord.x
+        mul r2.y, integer_uv[5].y, texcoord.y
+        mul r3.xy, split.yyyy, r2.xy
+        flr r3.xy, r3.xy
+        mul r4.xy, split.xxxx, r3.xy
+        add r4.xy, r2.xy, -r4.xy
+        mov r3, r3.xyxy
+        mov r4, r4.xyxy
+        ; Four simultaneous products: S*a, T*b, S*c, T*d.
+        mul r5, integer_uv[0], r4
+        mul r6, integer_uv[0], r3
+        mad r6, r4, integer_uv[1], r6
+        mul r7, split.wwww, r6
+        flr r7, r7
+        mul r8, split.zzzz, r7
+        add r8, r6, -r8
+        mul r8, split.xxxx, r8
+        add r8, r8, r5
+        mul r9, fraction.yyyy, r8
+        flr r9, r9
+        mul r10, fraction.xxxx, r9
+        add r10, r8, -r10
+        mul r5, integer_uv[1], r3
+        mul r5, split.zzzz, r5
+        add r5, r5, r7
+        add r5, r5, r9
+        ; High coefficient product modulo65536, using byte-sized multiplies.
+        mul r6, integer_uv[2], r4
+        mul r7, integer_uv[2], r3
+        mad r7, r4, integer_uv[3], r7
+        mul r8, split.yyyy, r7
+        flr r8, r8
+        mul r8, split.xxxx, r8
+        add r7, r7, -r8
+        mad r6, r7, split.xxxx, r6
+        mul r7, fraction.wwww, r6
+        flr r7, r7
+        mul r7, fraction.zzzz, r7
+        add r6, r6, -r7
+        add r5, r5, r6
+        add r6, signed_offset.xxxx, r5
+        mul r6, fraction.wwww, r6
+        flr r6, r6
+        mul r6, fraction.zzzz, r6
+        add r5, r5, -r6
+        ; Combine quotient and remainder separately, retaining fractional carry.
+        add r5.xy, r5.xz, r5.yw
+        add r5.xy, integer_uv[4].yw, r5.xy
+        add r10.xy, r10.xz, r10.yw
+        add r10.xy, integer_uv[4].xz, r10.xy
+        mul r10.xy, fraction.yyyy, r10.xy
+        flr r10.xy, r10.xy
+        add r5.xy, r5.xy, r10.xy
+        add r6.xy, signed_offset.xxxx, r5.xy
+        mul r6.xy, fraction.wwww, r6.xy
+        flr r6.xy, r6.xy
+        mul r6.xy, fraction.zzzz, r6.xy
+        add r5.xy, r5.xy, -r6.xy
+        mul r5.xy, integer_uv[6].xy, r5.xy
+        mov uv.xy, r5.xy
+    .else
+        mov r2.xy, texcoord
+        mov r2.z, unit.y
+        dp3 uv.x, uv_transform[0], r2
+        dp3 uv.y, uv_transform[1], r2
+    .end
+    .end
+    mov uv.zw, unit.xx
+    ifu use_lighting
+        call calculate_lighting
+    .else
+        mul r1, unit.zzzz, colour
+    .end
+    mul tint, material_tint, r1
+    end
+.end
+
+; Helpers use only native signed normal attributes and prepared uniforms.
+.proc calculate_lighting
+    mov r10.xyz, light_material[3]
+    mov r11.xyz, unit.xxx
+    ifu has_lights
+    ; Base64 coefficients and signed normal = low6 + high4*64.
+    ; Discard two digits for >>12, then retain 11 bits. All dot/carry
+    ; intermediates are exact integers within the PICA f24 significand.
+    mul r3.xyz, normal_radix.yyy, normal.xyz
+    flr r3.xyz, r3.xyz
+    mul r4.xyz, normal_radix.xxx, r3.xyz
+    add r4.xyz, normal.xyz, -r4.xyz
+    dp3 r5.x, light_normal[0], r4
+    dp3 r5.y, light_normal[1], r4
+    dp3 r5.z, light_normal[2], r4
+    mul r0.xyz, normal_radix.yyy, r5.xyz
+    flr r0.xyz, r0.xyz
+    dp3 r5.x, light_normal[3], r4
+    dp3 r5.y, light_normal[4], r4
+    dp3 r5.z, light_normal[5], r4
+    dp3 r6.x, light_normal[0], r3
+    dp3 r6.y, light_normal[1], r3
+    dp3 r6.z, light_normal[2], r3
+    add r5.xyz, r5.xyz, r6.xyz
+    add r5.xyz, r5.xyz, r0.xyz
+    mul r0.xyz, normal_radix.yyy, r5.xyz
+    flr r0.xyz, r0.xyz
+    dp3 r5.x, light_normal[6], r4
+    dp3 r5.y, light_normal[7], r4
+    dp3 r5.z, light_normal[8], r4
+    dp3 r6.x, light_normal[3], r3
+    dp3 r6.y, light_normal[4], r3
+    dp3 r6.z, light_normal[5], r3
+    add r5.xyz, r5.xyz, r6.xyz
+    add r5.xyz, r5.xyz, r0.xyz
+    mul r0.xyz, normal_radix.yyy, r5.xyz
+    flr r0.xyz, r0.xyz
+    mul r6.xyz, normal_radix.xxx, r0.xyz
+    add r2.xyz, r5.xyz, -r6.xyz
+    dp3 r5.x, light_normal[9], r4
+    dp3 r5.y, light_normal[10], r4
+    dp3 r5.z, light_normal[11], r4
+    dp3 r6.x, light_normal[6], r3
+    dp3 r6.y, light_normal[7], r3
+    dp3 r6.z, light_normal[8], r3
+    add r5.xyz, r5.xyz, r6.xyz
+    add r5.xyz, r5.xyz, r0.xyz
+    mul r6.xyz, normal_radix.www, r5.xyz
+    flr r6.xyz, r6.xyz
+    mad r5.xyz, -r6.xyz, normal_radix.zzz, r5.xyz
+    mad r2.xyz, r5.xyz, normal_radix.xxx, r2.xyz
+    add r5.xyz, light_scale.xxx, r2.xyz
+    mul r5.xyz, light_scale.www, r5.xyz
+    flr r5.xyz, r5.xyz
+    mad r2.xyz, -r5.xyz, light_scale.zzz, r2.xyz
+    call shade_normal
+    .end
+    call finish_lighting
+.end
+
+; r2 is the exact signed11 eye-space normal. Both ordinary uniform bases
+; and per-vertex native batch bases share the same light arithmetic.
+.proc shade_normal
+    mul r3.xyz, normal_scale.yyy, r2.xyz
+    flr r3.xyz, r3.xyz
+    mul r4.xyz, normal_scale.xxx, r3.xyz
+    add r4.xyz, r2.xyz, -r4.xyz
+        for light_loop
+            mov r13, light_direction[aL]
+            mov r14, light_colour[aL]
+            ; Floor each signed product BEFORE adding the diffuse dot.
+            mul r5.xyz, r3.xyz, r13.xyz
+            mul r6.xyz, split.www, r5.xyz
+            flr r6.xyz, r6.xyz
+            mad r5.xyz, -r6.xyz, split.zzz, r5.xyz
+            mul r5.xyz, normal_scale.xxx, r5.xyz
+            mad r5.xyz, r4.xyz, r13.xyz, r5.xyz
+            mul r5.xyz, light_accum.www, r5.xyz
+            flr r5.xyz, r5.xyz
+            add r5.xyz, r5.xyz, r6.xyz
+            dp3 r12.x, unit.yyyy, r5
+            slt r12.w, unit.xxxx, r12.xxxx
+            add r5.x, light_scale.xxxx, r12.xxxx
+            mul r5.x, light_scale.wwww, r5.xxxx
+            flr r5.x, r5.x
+            mad r8.x, -r5.xxxx, light_scale.zzzz, r12.xxxx
+            mul r8.x, r8.xxxx, r12.wwww
+            mul r7.xyz, light_material[0], r14.xyz
+            call accumulate_product
+            ifu use_specular
+                ; Signed11 halfway squared, shift10, then reduce ten bits.
+                add r5.x, r12.xxxx, r2.zzzz
+                add r6.x, light_scale.xxxx, r5.xxxx
+                mul r6.x, light_scale.wwww, r6.xxxx
+                flr r6.x, r6.x
+                mad r5.x, -r6.xxxx, light_scale.zzzz, r5.xxxx
+                mul r5.y, normal_scale.yyyy, r5.xxxx
+                flr r5.y, r5.y
+                mad r5.z, -r5.yyyy, normal_scale.xxxx, r5.xxxx
+                mul r6.x, r5.yyyy, r5.yyyy
+                mul r6.y, r5.yyyy, r5.zzzz
+                mul r6.y, light_word.xxxx, r6.yyyy
+                mad r6.y, r5.zzzz, r5.zzzz, r6.yyyy
+                mul r6.y, light_scale.yyyy, r6.yyyy
+                flr r6.y, r6.y
+                add r6.x, r6.xxxx, r6.yyyy
+                mul r6.y, light_scale.yyyy, r6.xxxx
+                flr r6.y, r6.y
+                mad r6.x, -r6.yyyy, light_scale.xxxx, r6.xxxx
+                ; Split both factors: retain the shift8 quotient exactly.
+                mul r6.y, normal_scale.yyyy, r6.xxxx
+                flr r6.y, r6.y
+                mad r6.z, -r6.yyyy, normal_scale.xxxx, r6.xxxx
+                mul r5.y, light_word.wwww, r13.wwww
+                flr r5.y, r5.y
+                mad r5.z, -r5.yyyy, light_word.zzzz, r13.wwww
+                mul r7.w, r6.yyyy, r5.yyyy
+                mul r8.x, r6.zzzz, r5.yyyy
+                mul r8.y, r6.yyyy, r5.zzzz
+                mul r8.z, normal_scale.zzzz, r8.yyyy
+                mul r8.z, light_modes.yyyy, r8.zzzz
+                flr r8.z, r8.z
+                mad r9.x, -r8.zzzz, light_modes.zzzz, r8.yyyy
+                mul r9.x, normal_scale.xxxx, r9.xxxx
+                mad r9.x, r6.zzzz, r5.zzzz, r9.xxxx
+                mul r9.x, light_word.wwww, r9.xxxx
+                flr r9.x, r9.x
+                add r8.x, r8.xxxx, r8.zzzz
+                add r8.x, r8.xxxx, r9.xxxx
+                mul r9.z, light_accum.wwww, r7.wwww
+                flr r9.z, r9.z
+                mad r7.w, -r9.zzzz, light_accum.zzzz, r7.wwww
+                mad r8.x, r7.wwww, normal_scale.xxxx, r8.xxxx
+                add r8.x, -light_accum.zzzz, r8.xxxx
+                mov r9.z, light_accum.xxxx
+                mul r9.z, normal_scale.zzzz, r9.zzzz
+                add r9.z, r9.zzzz, r8.xxxx
+                mul r9.z, light_accum.yyyy, r9.zzzz
+                flr r9.z, r9.z
+                mad r8.x, -r9.zzzz, light_accum.xxxx, r8.xxxx
+                max r8.x, unit.xxxx, r8.xxxx
+                ; Clamp at511, not512.
+                mov r9.z, light_accum.zzzz
+                add r9.z, -unit.yyyy, r9.zzzz
+                min r8.x, r9.zzzz, r8.xxxx
+                mul r8.x, r8.xxxx, r12.wwww
+                ifu use_shininess
+                    mul r8.x, light_modes.yyyy, r8.xxxx
+                    flr r8.x, r8.x
+                    mul r8.y, light_modes.yyyy, r8.xxxx
+                    flr r8.y, r8.y
+                    mova a0.x, r8.yyyy
+                    mov r9, shininess[a0.x]
+                    mad r8.x, -r8.yyyy, normal_weight.wwww, r8.xxxx
+                    add r5, light_lanes, -r8.xxxx
+                    max r5, r5, -r5
+                    add r5, unit.yyyy, -r5
+                    max r5, unit.xxxx, r5
+                    dp4 r8.x, r9, r5
+                    mul r8.x, unit.wwww, r8.xxxx
+                .end
+                mul r7.xyz, light_material[2], r14.xyz
+                call accumulate_product
+            .end
+            mov r8.x, light_accum.zzzz
+            mul r7.xyz, light_material[1], r14.xyz
+            call accumulate_product
+        .end
+.end
+
+.proc finish_lighting
+    min r1.xyz, light_modes.xxx, r10.xyz
+    ifu use_grey
+        mov r1.xyz, r1.xxx
+    .end
+    ifu use_toon
+        mova a0.x, r1.x
+        mov r1.xyz, shininess[a0.x]
+    .end
+    mul r5.xyz, light_modes.yyy, r1.xyz
+    flr r5.xyz, r5.xyz
+    mad r1.xyz, r1.xyz, light_modes.zzz, r5.xyz
+    mul r1.xyz, light_modes.www, r1.xyz
+    mov r1.w, unit.y
+.end
+
+; r7.rgb is a five-bit material/light product; r8.x is a signed factor.
+; Add its unsigned20 residue to (r10 quotient14,r11 remainder14).
+.proc accumulate_product
+    mul r8.y, normal_scale.yyyy, r8.xxxx
+    flr r8.y, r8.y
+    mad r8.z, -r8.yyyy, normal_scale.xxxx, r8.xxxx
+    mul r5.xyz, r7.xyz, r8.yyy
+    mul r6.xyz, light_accum.www, r5.xyz
+    flr r6.xyz, r6.xyz
+    mad r5.xyz, -r6.xyz, light_accum.zzz, r5.xyz
+    mul r5.xyz, normal_scale.xxx, r5.xyz
+    mad r5.xyz, r7.xyz, r8.zzz, r5.xyz
+    mul r9.xyz, light_accum.yyy, r5.xyz
+    flr r9.xyz, r9.xyz
+    mad r5.xyz, -r9.xyz, light_accum.xxx, r5.xyz
+    add r6.xyz, r6.xyz, r9.xyz
+    mul r9.xyz, light_word.yyy, r6.xyz
+    flr r9.xyz, r9.xyz
+    mad r6.xyz, -r9.xyz, light_word.xxx, r6.xyz
+    add r10.xyz, r10.xyz, r6.xyz
+    add r11.xyz, r11.xyz, r5.xyz
+    mul r9.xyz, light_accum.yyy, r11.xyz
+    flr r9.xyz, r9.xyz
+    add r10.xyz, r10.xyz, r9.xyz
+    mad r11.xyz, -r9.xyz, light_accum.xxx, r11.xyz
+.end

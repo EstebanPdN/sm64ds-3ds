@@ -17,6 +17,23 @@ def prepare(output):
         ' if(pipeline){profile_probe::Scope audio_scope(38,native_diagnostics::enabled());bool done=false;')
     text=once(text,' if(sound_pending){',
         ' if(sound_pending){\n  profile_probe::Scope audio_scope(38,native_diagnostics::enabled());')
+    # BUILD134 (needs prepare_integrated_audio's deferral): submit the batch a
+    # busy mixer deferred, and retry a busy maintenance on a later display
+    # event instead of parking the game thread behind the mixer.
+    text='#include <sys/stat.h>\n'+text
+    text=once(text,' if(sound_pending){',' sm64ds_native_sound_flush_deferred();\n if(sound_pending){')
+    text=once(text,'  const bool sound_ok=sm64ds_native_sound_maintenance();sm64ds_native_sound_retract();\n',
+        '''  // BUILD134: the BUILD 133 console tour measured the game thread parked
+  // 1.75 ms per update behind the mixer (which holds its lock 77% of the
+  // time on the Old 3DS core-1 quota). Maintenance only frees finished
+  // players (a start or stop collects for itself), so a busy lock is tried
+  // again on a later display event; it blocks only after a long run of
+  // misses. sdmc:/3ds/sm64ds/audio-espera.txt restores the blocking call.
+  static const bool blocking=[](){struct stat st;return stat("sdmc:/3ds/sm64ds/audio-espera.txt",&st)==0;}();
+  static unsigned misses=0;bool done=false;bool sound_ok=true;
+  if(!blocking&&misses<16){sound_ok=sm64ds_native_sound_try_maintenance(done);if(done)misses=0;else ++misses;}
+  else{sound_ok=sm64ds_native_sound_maintenance();sm64ds_native_sound_retract();misses=0;}
+''')
     text=once(text,' observed_cadence::after_frame(frame);',
         ' {profile_probe::Scope cadence_scope(39,native_diagnostics::enabled());observed_cadence::after_frame(frame);}')
     text=once(text,' native_motion::frame(current_scene,updates);',

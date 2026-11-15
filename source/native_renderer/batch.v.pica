@@ -1,0 +1,148 @@
+; Eight complete MVPs c0..31; UV/tint c32..34; ordinary lights c35..46.
+; Eight signed16 normal bases c47..70 reuse lookup rows only when no table or
+; toon lookup is needed. Other effects keep the ordinary shader and geometry.
+.fvec mvp[4]
+.fvec uv_transform[2], material_tint
+.fvec integer_uv[16]
+.fvec light_normal[12], light_direction[4], light_colour[4], light_material[4], shininess[32]
+.ivec light_loop
+.bool use_lighting, has_lights, use_specular, use_shininess
+.bool use_toon
+.bool use_grey
+.bool use_normal_uv
+.bool use_fixed_uv
+.constf unit(0.0, 1.0, 0.00392156862745, 2.0)
+.constf split(256.0, 0.00390625, 16.0, 0.0625)
+.constf fraction(4096.0, 0.000244140625, 65536.0, 0.0000152587890625)
+.constf signed_offset(32768.0, 0.0, 0.0, 0.0)
+.constf normal_scale(32.0, 0.03125, 0.5, 16.0)
+.constf normal_weight(512.0, 16384.0, 0.25, 4.0)
+.constf light_scale(1024.0, 0.0009765625, 2048.0, 0.00048828125)
+.constf light_accum(16384.0, 0.00006103515625, 512.0, 0.001953125)
+.constf light_modes(31.0, 0.25, 8.0, 0.00392156862745)
+.constf light_lanes(0.0, 1.0, 2.0, 3.0)
+.constf normal_radix(64.0, 0.015625, 32.0, 0.03125)
+.constf light_word(64.0, 0.015625, 256.0, 0.00390625)
+.out clip position
+.out tint color
+.out uv texcoord0
+.in position v0
+.in texcoord v1
+.in colour v2
+.in normal v3
+.in rows v4
+.entry batch_main
+.proc batch_main
+    mov r0.xyz, position
+    mov r0.w, unit.y
+    mova a0.x, rows.x
+    dp4 clip.x, mvp[a0.x], r0
+    mova a0.x, rows.y
+    dp4 clip.y, mvp[a0.x], r0
+    mova a0.x, rows.z
+    dp4 clip.z, mvp[a0.x], r0
+    mova a0.x, rows.w
+    dp4 clip.w, mvp[a0.x], r0
+    mov r0.xy, texcoord.xy
+    mov r0.z, unit.y
+    dp3 uv.x, light_normal[9], r0
+    dp3 uv.y, light_normal[10], r0
+    mov uv.zw, unit.xx
+    ifu use_lighting
+        call batch_lighting
+    .else
+        mul r1, unit.zzzz, colour
+    .end
+    mul tint, light_normal[11], r1
+    end
+.end
+.proc batch_lighting
+    mov r10.xyz, light_material[3]
+    mov r11.xyz, unit.xxx
+    ifu has_lights
+        ; Signed10 normal = low6 + signed high4*64. Two coefficient digits
+        ; and the signed high digit suffice for every accepted signed16 basis.
+        mul r0.x, normal_weight.zzzz, rows.xxxx
+        mul r0.x, light_lanes.wwww, r0.xxxx
+        mul r3.xyz, normal_radix.yyy, normal.xyz
+        flr r3.xyz, r3.xyz
+        mad r4.xyz, -r3.xyz, normal_radix.xxx, normal.xyz
+        mova a0.x, r0.x
+        mov r15, shininess[a0.x]
+        mul r7.xyz, normal_radix.yyy, r15.xyz
+        flr r7.xyz, r7.xyz
+        mul r9.xyz, fraction.yyy, r15.xyz
+        flr r9.xyz, r9.xyz
+        mad r8.xyz, -r9.xyz, normal_radix.xxx, r7.xyz
+        mad r7.xyz, -r7.xyz, normal_radix.xxx, r15.xyz
+        dp3 r5.x, r7, r4
+        mul r5.x, normal_radix.yyyy, r5.xxxx
+        flr r5.x, r5.x
+        dp3 r5.y, r8, r4
+        dp3 r6.x, r7, r3
+        add r5.x, r5.xxxx, r5.yyyy
+        add r5.x, r5.xxxx, r6.xxxx
+        mul r5.x, normal_radix.yyyy, r5.xxxx
+        flr r5.x, r5.x
+        dp3 r5.y, r9, r4
+        dp3 r6.x, r8, r3
+        add r5.x, r5.xxxx, r5.yyyy
+        add r5.x, r5.xxxx, r6.xxxx
+        dp3 r5.y, r9, r3
+        mad r2.x, r5.yyyy, normal_radix.xxxx, r5.xxxx
+        add r0.x, unit.yyyy, r0.xxxx
+        mova a0.x, r0.x
+        mov r15, shininess[a0.x]
+        mul r7.xyz, normal_radix.yyy, r15.xyz
+        flr r7.xyz, r7.xyz
+        mul r9.xyz, fraction.yyy, r15.xyz
+        flr r9.xyz, r9.xyz
+        mad r8.xyz, -r9.xyz, normal_radix.xxx, r7.xyz
+        mad r7.xyz, -r7.xyz, normal_radix.xxx, r15.xyz
+        dp3 r5.x, r7, r4
+        mul r5.x, normal_radix.yyyy, r5.xxxx
+        flr r5.x, r5.x
+        dp3 r5.y, r8, r4
+        dp3 r6.x, r7, r3
+        add r5.x, r5.xxxx, r5.yyyy
+        add r5.x, r5.xxxx, r6.xxxx
+        mul r5.x, normal_radix.yyyy, r5.xxxx
+        flr r5.x, r5.x
+        dp3 r5.y, r9, r4
+        dp3 r6.x, r8, r3
+        add r5.x, r5.xxxx, r5.yyyy
+        add r5.x, r5.xxxx, r6.xxxx
+        dp3 r5.y, r9, r3
+        mad r2.y, r5.yyyy, normal_radix.xxxx, r5.xxxx
+        add r0.x, unit.yyyy, r0.xxxx
+        mova a0.x, r0.x
+        mov r15, shininess[a0.x]
+        mul r7.xyz, normal_radix.yyy, r15.xyz
+        flr r7.xyz, r7.xyz
+        mul r9.xyz, fraction.yyy, r15.xyz
+        flr r9.xyz, r9.xyz
+        mad r8.xyz, -r9.xyz, normal_radix.xxx, r7.xyz
+        mad r7.xyz, -r7.xyz, normal_radix.xxx, r15.xyz
+        dp3 r5.x, r7, r4
+        mul r5.x, normal_radix.yyyy, r5.xxxx
+        flr r5.x, r5.x
+        dp3 r5.y, r8, r4
+        dp3 r6.x, r7, r3
+        add r5.x, r5.xxxx, r5.yyyy
+        add r5.x, r5.xxxx, r6.xxxx
+        mul r5.x, normal_radix.yyyy, r5.xxxx
+        flr r5.x, r5.x
+        dp3 r5.y, r9, r4
+        dp3 r6.x, r8, r3
+        add r5.x, r5.xxxx, r5.yyyy
+        add r5.x, r5.xxxx, r6.xxxx
+        dp3 r5.y, r9, r3
+        mad r2.z, r5.yyyy, normal_radix.xxxx, r5.xxxx
+        add r5.xyz, light_scale.xxx, r2.xyz
+        mul r5.xyz, light_scale.www, r5.xyz
+        flr r5.xyz, r5.xyz
+        mad r2.xyz, -r5.xyz, light_scale.zzz, r2.xyz
+        call shade_normal
+    .end
+    call finish_lighting
+.end

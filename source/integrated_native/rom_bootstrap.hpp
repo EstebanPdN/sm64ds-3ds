@@ -41,9 +41,24 @@ inline constexpr auto crc_table = [] {
     }
     return table;
 }();
+// Slicing-by-4 tables of the same CRC-32 (BUILD121: the boot check of the
+// 15.7 MB package runs on a 268 MHz ARM11; four bytes per table round).
+inline constexpr auto crc_slices = [] {
+    std::array<std::array<uint32_t, 256>, 4> table{};
+    table[0] = crc_table;
+    for (unsigned i = 0; i != 256; ++i)
+        for (unsigned k = 1; k != 4; ++k)
+            table[k][i] = (table[k - 1][i] >> 8) ^ crc_table[table[k - 1][i] & 255u];
+    return table;
+}();
 inline uint32_t crc_update(uint32_t state, const unsigned char* bytes, size_t size) {
-    for (size_t i = 0; i != size; ++i)
-        state = crc_table[(state ^ bytes[i]) & 255u] ^ (state >> 8);
+    for (; size >= 4; bytes += 4, size -= 4) {
+        state ^= uint32_t(bytes[0]) | uint32_t(bytes[1]) << 8 | uint32_t(bytes[2]) << 16 | uint32_t(bytes[3]) << 24;
+        state = crc_slices[3][state & 255u] ^ crc_slices[2][(state >> 8) & 255u] ^
+                crc_slices[1][(state >> 16) & 255u] ^ crc_slices[0][state >> 24];
+    }
+    for (; size; ++bytes, --size)
+        state = crc_table[(state ^ *bytes) & 255u] ^ (state >> 8);
     return state;
 }
 inline uint32_t crc(const unsigned char* bytes, size_t size) {

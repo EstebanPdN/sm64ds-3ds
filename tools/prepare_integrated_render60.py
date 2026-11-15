@@ -339,6 +339,8 @@ extern "C" void* __wrap_func_02043fdc(void* list){
     changed.extend(prepare_mesh_uniforms(output))
     from prepare_integrated_vertex_inputs import prepare as prepare_vertex_inputs
     changed.extend(prepare_vertex_inputs(output))
+    from prepare_integrated_gpu_geometry import prepare as prepare_gpu_geometry
+    changed.extend(prepare_gpu_geometry(output))
     from prepare_integrated_title_background import prepare as prepare_title_background
     changed.extend(prepare_title_background(output))
     # Apply the saved master gain to completed PCM blocks, before DSP ownership.
@@ -352,6 +354,9 @@ extern "C" void* __wrap_func_02043fdc(void* list){
     path.write_text(text);changed.append('port/audio/sound_output_3ds.cpp')
     from prepare_integrated_audio import prepare as prepare_audio
     changed.extend(prepare_audio(output))
+    # ARMv6 voice loops of the segment mixer (bit-identical; Unicorn gate).
+    from prepare_integrated_mixer import prepare as prepare_mixer
+    changed.extend(prepare_mixer(output))
     from prepare_integrated_save import prepare as prepare_save
     changed.extend(prepare_save(output))
     # Draw the FPS strip on each upper eye, options on the lower LCD.

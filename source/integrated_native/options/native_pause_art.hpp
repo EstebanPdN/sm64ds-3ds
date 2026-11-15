@@ -121,7 +121,7 @@ template<class Sink> void menu(Sink& out,const enhance::native_pause::Menu& mode
   if(toggle){
    const bool on=std::strcmp(value,"ON")==0;
    for(unsigned b=0;b<2;++b){
-    struct Tint {Sink& target;bool pressed;void pixel(int x,int y,uint32_t c){if(pressed&&c==0xffffecaf)c=0xffc9ac95;target.pixel(x,y,c);}} tint{out,b==unsigned(!on)};
+    struct Tint {Sink& target;bool dimmed;void pixel(int x,int y,uint32_t c){if(dimmed&&c==0xffffecaf)c=0xffc9ac95;target.pixel(x,y,c);}} tint{out,b!=unsigned(!on)};
     button(tint,155+int(b)*75,y,65,36,b?"OFF":"ON",false);
     if(b==unsigned(!on)){for(int x=167+int(b)*75;x<208+int(b)*75;++x)out.pixel(x,y+29,0xff8d4300);}
    }

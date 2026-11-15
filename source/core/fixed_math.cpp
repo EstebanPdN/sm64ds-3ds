@@ -1,4 +1,6 @@
 #include "sm64ds/fixed_math.hpp"
+// Relative: the generated checkout keeps both files in one directory.
+#include "../native_renderer/ds_math_unit.h"
 #include <cstring>
 #include <limits>
 
@@ -46,16 +48,10 @@ int32_t divide_q12(int32_t numerator,int32_t denominator) {
 }
 
 uint32_t integer_sqrt(uint64_t value) {
-    // Restoring square root: at most 32 iterations, integer-only and exact.
-    uint64_t root=0,bit=uint64_t(1)<<62;
-    while(bit>value)bit>>=2;
-    while(bit) {
-        const uint64_t candidate=root+bit;
-        root>>=1;
-        if(value>=candidate) {value-=candidate;root+=bit;}
-        bit>>=2;
-    }
-    return uint32_t(root);
+    // floor(sqrt(value)), exact for every input: the VFP square root with an
+    // integer correction (ds_math_unit.h). The former restoring loop took up
+    // to 32 iterations of 64-bit arithmetic on the ARM11.
+    return sm64ds_ds_math_isqrt64(value);
 }
 
 int32_t game_sqrt(uint64_t value) {

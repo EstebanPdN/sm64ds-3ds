@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "rom_sha1": "1367529f2cb23e76ef295cb1727333ae8f0a6cd7",
+  "bank_id": 6000,
+  "glyphs": 256,
+  "font_index": 37,
+  "font_sha256": "6a106e478310038a72ed7d0b8f640eca4a652c20853d69b4e710dc2567e06f70",
+  "palette_index": 43,
+  "tables": {
+    "widths": {
+      "address": 34614776,
+      "bytes": 256,
+      "sha256": "413102325d5cb09c04acc63abac54f3a9228cf369ddde4ee360ddd9a4b624e07"
+    },
+    "masks": {
+      "address": 34437828,
+      "bytes": 64,
+      "sha256": "6e11138bfa9a7f00cc20d84494b0e39d334b9fd8d481f763f6ccaf6c564fc42e"
+    },
+    "palette_override": {
+      "address": 34437700,
+      "bytes": 10,
+      "sha256": "72b1518d31a6d7af8dfb4a99155a69b93f5fd3919165165c04b0544ab28636c8"
+    }
+  },
+  "evidence": [
+    {
+      "source": "src/func_ov007_020b8d48.c",
+      "sha256": "ee32744f108ac09845bdfa17a1b47fe88740966c3c3bbfe33f1980616ffe7086"
+    },
+    {
+      "source": "src/func_ov007_020b8548.c",
+      "sha256": "93b681bb6d5e5e84f2b14d18e794b64e4947fc4950e24ea9bf04b016241cf7c7"
+    },
+    {
+      "source": "src/func_ov007_020b850c.c",
+      "sha256": "cd5815110ede7b99c6d89f5859297fe9a34d7f16904a4878b4c6e335eead6ba5"
+    },
+    {
+      "source": "src/func_ov007_020b8b80.c",
+      "sha256": "11fbb1125445e25628d49ed544238094ebaa4b7b1a159e77fd2ca7e8935495c9"
+    },
+    {
+      "source": "src/func_ov007_020b8070.c",
+      "sha256": "bba7b95690e0b1c8afc6319dfb48c0e9cfe3c1642009c3ff6320358bc59303b2"
+    }
+  ]
+}

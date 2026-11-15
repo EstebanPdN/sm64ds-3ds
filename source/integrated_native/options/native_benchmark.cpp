@@ -5,6 +5,7 @@
 #include "SaveData.h"
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 extern "C" {
 void StartFile(signed char level,unsigned char entrance);
 void _ZN8dScene_c14StartSceneFadeEjjt(unsigned scene,unsigned arg,unsigned short color);
@@ -18,6 +19,20 @@ extern int data_0209fc48;
 extern unsigned char data_0209f2c4;
 }
 namespace native_benchmark {
+// Opt-in fresh-renderer cost fixture. Uses the same verified retail entry
+// APIs as the older campaign, without RAM edits, unlocks or save writes.
+void native_course(unsigned scene,unsigned updates){
+ static const bool enabled=[](){const char* value=std::getenv("SM64DS_NATIVE_COURSE");return value&&!std::strcmp(value,"bob");}();
+ static bool entered=false,character=false;
+ if(!enabled)return;
+ if(!entered&&scene==1&&updates>=750){
+  entered=true;SaveData::SetCharacterIntro(7);StartFile(6,0);
+  std::puts("NATIVE_COURSE request=bob level=6 entrance=0 originalAPI=StartFile openingSeen=7 saveWrite=0");
+ }else if(entered&&!character&&scene==3&&data_0209f2f8==6&&data_0209f394[0]){
+  character=true;_ZN6Player16SetRealCharacterEj(data_0209f394[0],0);
+  std::puts("NATIVE_COURSE entered=bob character=Mario originalAPI=SetRealCharacter");
+ }
+}
 static Model model;
 static bool checked=false;
 static Profile profile;

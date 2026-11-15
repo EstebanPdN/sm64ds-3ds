@@ -35,7 +35,11 @@ AccessControlInfo:
   IdealProcessor: 0
   AffinityMask: 3
   Priority: 16
-  MaxCpu: 0x9E
+  # Core-1 time (BUILD124): PM allows the application MaxCpu & 0x7F percent,
+  # bit 7 keeps the multi-thread preemption mode of the old 0x9E. 0x9E capped
+  # it at 30 and APT refused 80 with d8e05bf4 (BUILD88 hardware log); 0xD0
+  # allows 80 for the Old 3DS render worker on core 1.
+  MaxCpu: 0xD0
   HandleTableSize: 0x200
   DisableDebug: false
   EnableForceDebug: false
@@ -64,6 +68,8 @@ AccessControlInfo:
     ExitThread: 9
     SleepThread: 10
     GetThreadPriority: 11
+    # Render worker core report (diagnostic log line).
+    GetProcessorID: 17
     ReleaseMutex: 20
     CreateEvent: 23
     SignalEvent: 24
@@ -85,6 +91,8 @@ AccessControlInfo:
     GetResourceLimitCurrentValues: 58
     # CRT, GPU command and NDSP invariant failures.
     Break: 60
+    # Direct data-cache clean of CPU-written GPU/DSP buffers (no GSP/DSP IPC).
+    StoreProcessDataCache: 83
     # Native DS address aliases fall back to this on a duplicated own handle.
     ControlProcessMemory: 112
   ServiceAccessControl:

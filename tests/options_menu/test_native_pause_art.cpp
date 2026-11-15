@@ -47,6 +47,18 @@ int main(int argc,char** argv){
  auto dumping=settings;dumping.developer_dumps=true;
  m.begin(dumping,0,false);key(m,128);key(m,128);key(m,1);
  out.pixels.fill(0);native_lower::menu(out,m); // L+R+A sprite layout must remain inside320x240
+ // The selected state stays bright; toggling swaps the two fills. The
+ // underline is selection feedback too, but must not invert the brightness.
+ for(bool on:{false,true}){
+  auto state=settings;state.developer_dumps=on;m.begin(state,0,false);
+  key(m,128);key(m,128);key(m,1);out.pixels.fill(0);native_lower::menu(out,m);
+  unsigned bright[2]{},dim[2]{};
+  for(unsigned b=0;b<2;++b)for(unsigned y=36;y<72;++y)for(unsigned x=155+b*75;x<220+b*75;++x){
+   bright[b]+=out.pixels[y*320+x]==0xffffecaf;dim[b]+=out.pixels[y*320+x]==0xffc9ac95;
+  }
+  const unsigned selected=on?0:1;
+  assert(bright[selected]>100&&dim[selected]==0&&bright[selected^1]==0&&dim[selected^1]>100);
+ }
  for(unsigned volume:{0u,100u,200u}){
   auto s=settings;s.audio_volume=volume;m.begin(s,0,false);key(m,1);out.pixels.fill(0);native_lower::menu(out,m);
   assert(out.pixels[174*320+160]==0); // transparent map gap below the volume card

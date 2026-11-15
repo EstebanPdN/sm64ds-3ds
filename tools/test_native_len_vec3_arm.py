@@ -70,6 +70,11 @@ def symbols(path):
 class Cpu:
     def __init__(self):
         self.uc = Uc(UC_ARCH_ARM, UC_MODE_ARM);self.pages = set()
+        # The ARM11 build divides and takes square roots on the VFP
+        # (ds_math_unit.h): grant CP10/CP11 access and enable the unit.
+        from unicorn.arm_const import UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC
+        self.uc.reg_write(UC_ARM_REG_C1_C0_2, self.uc.reg_read(UC_ARM_REG_C1_C0_2) | (0xf << 20))
+        self.uc.reg_write(UC_ARM_REG_FPEXC, 0x40000000)
         self.reads = [];self.writes = [];self.invalid = []
         for address, size, perms in ((BUFFER, 0x2000, 3), (STACK, 0x10000, 3), (STOP, 4096, 5)):
             self.map(address, size, perms)

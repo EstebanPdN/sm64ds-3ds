@@ -108,6 +108,7 @@ public:
 // Game-thread only. Absent marker / disabled diagnostics / wrong model => no-op.
 // True requests one full existing diagnostic capture; call capture_completed
 // after its RAM+GPU work, so capture stalls never advance the sample clock.
+void native_course(unsigned scene,unsigned updates);
 bool frame(unsigned scene,unsigned updates,bool diagnostics_enabled,bool actual_new3ds,uint64_t now_ticks);
 void capture_completed(bool success,uint64_t now_ticks);
 void external_capture_completed(uint64_t begin_ticks,uint64_t end_ticks);

@@ -61,17 +61,32 @@ inline rom_bootstrap::Result verify(const char* path,rom_bootstrap::Callback cal
         struct stat st{};
         if(::fstat(::fileno(file.file),&st)||!S_ISREG(st.st_mode)||st.st_size<0||
            uint64_t(st.st_size)!=header_bytes+rom_install_manifest::total_bytes){out.error="Incorrect .sm64ds package size";return out;}
+        // BUILD121: large direct reads across members. Member-sized freads
+        // through the small default stdio buffer cost one SD request per
+        // block: 28 s per boot on an Old 3DS (0.55 MB/s). Every member's CRC
+        // is still checked.
+        std::setvbuf(file.file,nullptr,_IONBF,0);
         unsigned char header[header_bytes];
         if(std::fread(header,1,sizeof header,file.file)!=sizeof header||!header_valid(header,sizeof header)){
             out.error="Incompatible .sm64ds package header";return out;}
-        std::array<unsigned char,rom_bootstrap::detail::buffer_bytes> buffer{};
-        uint64_t done=0;
+        std::array<unsigned char,rom_bootstrap::detail::buffer_bytes> fallback{};
+        constexpr std::size_t large=512*1024;
+        struct Block {unsigned char* data=nullptr;~Block(){std::free(data);}} block;
+        block.data=static_cast<unsigned char*>(std::malloc(large));
+        unsigned char* const buffer=block.data?block.data:fallback.data();
+        const std::size_t capacity=block.data?large:fallback.size();
+        uint64_t done=0,unread=rom_install_manifest::total_bytes;std::size_t have=0,at=0;
         for(std::size_t i=0;i<count;++i){const auto& entry=rom_install_manifest::files[i];uint32_t left=entry.size,crc=0xffffffffu;
             if(i&&std::strcmp(rom_install_manifest::files[i-1].path,entry.path)>=0){out.error="Invalid packed manifest order";return out;}
-            while(left){const auto n=left<buffer.size()?left:buffer.size();
-                if(std::fread(buffer.data(),1,n,file.file)!=n){out.error="Cannot read complete .sm64ds package";return out;}
-                crc=rom_bootstrap::detail::crc_update(crc,buffer.data(),n);done+=n;left-=uint32_t(n);
-                if(!rom_bootstrap::detail::notify(callback,context,out,"verify-cache",done,rom_install_manifest::total_bytes,unsigned(i),unsigned(count)))return out;}
+            while(left){
+                if(at==have){
+                    const auto want=std::size_t(unread<capacity?unread:capacity);
+                    if(!want||std::fread(buffer,1,want,file.file)!=want){out.error="Cannot read complete .sm64ds package";return out;}
+                    unread-=want;have=want;at=0;
+                }
+                const auto n=std::size_t(left)<have-at?std::size_t(left):have-at;
+                crc=rom_bootstrap::detail::crc_update(crc,buffer+at,n);at+=n;done+=n;left-=uint32_t(n);
+                if(at==have&&!rom_bootstrap::detail::notify(callback,context,out,"verify-cache",done,rom_install_manifest::total_bytes,unsigned(i),unsigned(count)))return out;}
             if((crc^0xffffffffu)!=entry.crc32){out.error="Damaged .sm64ds package; recreate it on your computer";return out;}
         }
         if(!file.close(out,path))return out;

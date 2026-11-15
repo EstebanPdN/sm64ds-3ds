@@ -66,6 +66,7 @@ def main():
     legacy = audio.LEGACY_INCLUDE + raw.replace('        DSP_FlushDataCache(',
                                                 audio.LEGACY_GAIN + '        DSP_FlushDataCache(', 1)
     assert audio.patch_output(raw) == audio.patch_output(legacy)
+    assert 'constexpr unsigned Chunk=64;' in audio.patch_output(raw)
     for patcher, text in [(audio.patch_output, raw.replace('constexpr unsigned Chunk=128;', 'constexpr unsigned Chunk=129;')),
                           (save.patch_cart, (VENDOR / 'port/hal/save_cart.cpp').read_text().replace(
                               'if (std::fflush(file)!=0) good=false;', 'if (std::fflush(file)!=0) return false;'))]:
@@ -101,6 +102,14 @@ def main():
         run([compiler, '-std=c++17', *common, '-I' + str(base), '-I' + str(TESTS),
              '-I' + str(generated / 'port/audio'), *sources, '-o', out / name], name + '-build')
         reports[name] = run([out / name], name + '-run').stdout
+    # Generated game/mixer lock handoff (sound_native.cpp Guard) under TSan.
+    native = (generated / 'port/audio/sound_native.cpp').read_text()
+    guard_start = native.index('struct Guard {')
+    guard_end = native.index('~Guard(){RecursiveLock_Unlock(l);}};', guard_start) + len('~Guard(){RecursiveLock_Unlock(l);}};')
+    (out / 'guard_extract.inc').write_text(native[guard_start:guard_end] + '\n')
+    run([compiler, '-std=c++17', '-O1', '-g', '-fsanitize=thread', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
+         '-I' + str(base), '-I' + str(out), TESTS / 'test_mixer_lock.cpp', '-o', out / 'mixer-lock'], 'mixer-lock-build')
+    reports['mixer-lock'] = run([out / 'mixer-lock'], 'mixer-lock-run').stdout
     run([compiler, '-std=c++17', '-D__3DS__', *common, '-I' + str(base),
          TESTS / 'test_storage.cpp', '-o', out / 'storage-3ds-policy'], 'storage-3ds-policy-build')
     reports['storage-3ds-policy'] = run([out / 'storage-3ds-policy'], 'storage-3ds-policy-run').stdout
