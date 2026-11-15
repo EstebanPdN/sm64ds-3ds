@@ -110,7 +110,8 @@ forbidden production-path regression fails with the old helper and passes
 with the fixed one. Settings save and backup recovery were checked in
 isolated profiles. The normal Old title-to-file flow was also observed.
 
-Native-renderer BUILD 135 passed the host suites and the gates above; in
+Native-renderer BUILD 135 and 136 passed the host suites and the gates
+above (136 also from a clean checkout, as CI runs them); in
 Azahar (Old and New profiles, .3dsx and the 80 MiB CIA) its screenshots match
 BUILD 133 with Lock FPS 30, 60 and Unlocked, with the older paths switched
 back on, and while Lock FPS changes during play. Console timing is measured

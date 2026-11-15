@@ -1,5 +1,31 @@
 # Current acceptance checklist
 
+## BUILD136 — BUILD 135 recompilada desde el código publicado, 2026-11-15
+
+Primera versión compilada desde el código subido a GitHub (rama
+`native-renderer-test-line`). Respecto a BUILD 135 no cambia el
+comportamiento: limpieza de código muerto (dos funciones sin llamadas y seis
+fuentes huérfanas del laboratorio de movimiento), espacios en blanco, rutas
+locales sustituidas por variables de entorno, herramientas de verificación
+dentro del repositorio (`tools/native_renderer/pipeline/`), documentación y
+un arreglo de la prueba `native_game_preparer`, que fallaba en un clon limpio.
+
+Comprobado (no es evidencia de consola ni de FPS):
+
+- CI de GitHub reproducido en un clon limpio: comprobación del repositorio,
+  dependencias públicas, compilación de host con sanitizadores, CTest (tras el
+  arreglo), pruebas de herramientas y de audio/guardado.
+- Azahar, Bob-omb: 26/26 capturas idénticas a BUILD 133 con Lock FPS 30 y 60
+  (perfil Old) y con el perfil New.
+- CIA136 instalado, política 80 MB, Bob-omb completo (24 informes, 4 zonas)
+  con 30 y con 60: 0 errores, 0 segundas imágenes perdidas, 72/72 capturas
+  iguales entre 30 y 60 y frente a CIA135 salvo 9 píxeles del último dígito
+  de la etiqueta «BUILD» en la pausa; memoria lineal libre 11,3 MB (30) y
+  10,6 MB (60).
+- CIA SHA-256: `12db37f62a69e5e5851921145ad16a73ddc06ed14a32008b703e804cab0aa413`.
+
+Pendiente en consola (Old): lo mismo que en BUILD 135.
+
 ## BUILD135 — segunda imagen del par más barata y tres bugs del 2D, 2026-11-15
 
 Sustituye a BUILD134, que se entregó por QR pero la consola no llegó a

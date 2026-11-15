@@ -3,7 +3,7 @@
 **In development; no public binary release.** Two local lines exist:
 
 - **Native-renderer test candidates** (native-test CIA, title
-  `000400000F536500`): the current testing line. Latest: BUILD 135
+  `000400000F536500`): the current testing line. Latest: BUILD 136
   (2026-11-15), checked in Azahar; console qualification pending.
 - **Integrated package** (title `000400000F536400`): last numbered package
   BUILD 24 (2026-10-25), with the provider's renderer.
@@ -50,7 +50,7 @@ to be qualified on identified devices.
 | Azahar Old/New | First boot, directed level, pause and visible build checked; save/backup recovery checked in isolated profiles. |
 | Original title flow | Old introduction → title/options → file selector observed with real touch input. |
 | Whole-game progression | Incomplete coverage. |
-| Native renderer BUILD 135 | Host suites pass; in Azahar (Old and New profiles, 80 MiB CIA) screenshots match BUILD 133 with Lock FPS 30, 60 and Unlocked, and with the older paths switched back on. |
+| Native renderer BUILD 135–136 | Host suites pass, also from a clean checkout; in Azahar (Old and New profiles, 80 MiB CIA) screenshots match BUILD 133 with Lock FPS 30, 60 and Unlocked, and with the older paths switched back on. |
 | Physical Old/New | Pending qualification. |
 | Sustained FPS / audible quality / power-loss safety | No general hardware claim. |
 

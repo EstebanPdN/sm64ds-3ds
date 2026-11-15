@@ -1,4 +1,13 @@
-## Current local test candidate — BUILD 135, native renderer (2026-11-15)
+## Current local test candidate — BUILD 136, native renderer (2026-11-15)
+
+Native-test CIA, title `000400000F536500`, SHA-256
+`12db37f62a69e5e5851921145ad16a73ddc06ed14a32008b703e804cab0aa413`.
+BUILD 135 rebuilt from the published source after the cleanup that removed
+unused functions and orphaned sources; no behavior change is intended. In
+Azahar its screenshots match BUILD 133 with Lock FPS 30 and 60 on the Old
+profile and with the New profile. Physical qualification is pending.
+
+## Previous local test candidate — BUILD 135, native renderer (2026-11-15)
 
 Native-test CIA, title `000400000F536500`, SHA-256
 `3cf0f412b74f8368c2fdc7b2b97a5c39b8d96492eb7827330f6550d37e969f59`.

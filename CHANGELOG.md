@@ -17,7 +17,7 @@ candidates, not GitHub releases or a promise of full-game compatibility.
 - Keep private game inputs, dumps, generated packages and design iterations
   outside the public Git tree. No binary release is created.
 
-## Local BUILD 25–135 — native renderer test line, 2026-10-26 to 2026-11-15
+## Local BUILD 25–136 — native renderer test line, 2026-10-26 to 2026-11-15
 
 Native-test CIAs (title `000400000F536500`); Azahar-checked, physical
 qualification pending. Details: [current-work checklist](docs/CURRENT_WORK_CHECKLIST.md).
@@ -40,6 +40,8 @@ qualification pending. Details: [current-work checklist](docs/CURRENT_WORK_CHECK
   three 2D faults in the pinned PPU code.
 - Document the renderer, its pipeline, the test mode and the Citro3D test
   oracles; remove orphaned laboratory sources and unused functions.
+- BUILD 136 is BUILD 135 rebuilt from the published source after that
+  cleanup; its image is unchanged.
 
 ## Local BUILD 24 — 2026-10-25
 

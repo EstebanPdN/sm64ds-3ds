@@ -2,7 +2,7 @@
 
 BUILD 24 addressed the identified first-boot settings crash and made local
 candidate identification visible. The native-renderer test line (BUILD 86 to
-135) now carries the testing effort. The next work is acceptance against the
+136) now carries the testing effort. The next work is acceptance against the
 same executable and evidence-driven fixes, rather than assuming a build
 proves complete playability.
 

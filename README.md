@@ -17,7 +17,7 @@
 <p align="center">
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/status.svg" alt="Status: in development" height="22"></a>
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/platform.svg" alt="Target: Old and New Nintendo 3DS" height="22"></a>
-  <a href="docs/STATUS.md"><img src="docs/images/badges/build.svg" alt="Latest local test candidate: BUILD 135" height="22"></a>
+  <a href="docs/STATUS.md"><img src="docs/images/badges/build.svg" alt="Latest local test candidate: BUILD 136" height="22"></a>
   <a href="LICENSE.md"><img src="docs/images/badges/license.svg" alt="Component-specific licenses" height="22"></a>
 </p>
 
@@ -36,7 +36,7 @@ analog movement, a touch interface and configurable camera and presentation.
 This project was developed with the help of [OpenAI Codex](https://openai.com/codex/). Learn more about the development process [here](AI_DEVELOPMENT.md).
 
 **In active development; source available, with no public binary release yet.**
-The latest local test candidate is BUILD 135 (native renderer). See
+The latest local test candidate is BUILD 136 (native renderer). See
 [Compatibility](docs/COMPATIBILITY.md) for what has been checked and the
 remaining Old/New 3DS hardware qualification.
 
