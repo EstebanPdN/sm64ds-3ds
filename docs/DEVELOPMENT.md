@@ -142,3 +142,7 @@ documentan como tales. El objetivo de FPS sostenidos, audio audible, progreso
 y lifecycle requiere una tanda posterior de pruebas sobre el mismo candidato.
 El [inventario](INVENTARIO_PORT_2026-10-21.md) distingue los arreglos de código
 de esa aceptación pendiente.
+
+## Local test-session storage
+
+Each playable renderer session under `build/native-renderer/playable-r1/sessions/` has its own emulator bundle and user directory. On APFS, the runner can share file blocks through copy-on-write clones. Adding directory sizes can therefore overstate physical disk use. Before retiring a session, preserve its save data, test plan, captures and any unreproduced fault. Keep ROMs, firmware and memory dumps local.
