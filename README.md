@@ -24,7 +24,7 @@
 
 <p align="center">
   <a href="https://estebanpdn.github.io/"><img src="docs/images/website.svg" alt="Visit Esteban’s Forge" width="142" height="46"></a>
-  <a href="https://discord.gg/BjbzfRYpV"><img src="docs/images/discord-official.svg" alt="Join our Discord community" width="166" height="46"></a>
+  <a href="https://discord.com/servers/esteban-s-forge-1533248895663210506"><img src="docs/images/discord-official.svg" alt="Join our Discord community" width="166" height="46"></a>
   <!-- <a href="https://ko-fi.com/estebanpdn"><img src="docs/images/kofi.svg" alt="Support EstebanPdN on Ko-fi" width="190" height="46"></a> -->
   <a href="https://www.patreon.com/c/EstebanPdN"><img src="docs/images/patreon.svg" alt="Support EstebanPdN on Patreon" width="216" height="46"></a>
 </p>
@@ -136,7 +136,7 @@ compatibility contracts to preserve.
 
 ## Community and bug reports
 
-[Join Discord](https://discord.gg/BjbzfRYpV) for discussion and testing.
+[Join Discord](https://discord.com/servers/esteban-s-forge-1533248895663210506) for discussion and testing.
 Use [GitHub issues](https://github.com/EstebanPdN/sm64ds-3ds/issues) for
 reproducible bugs, including the visible BUILD number, console model and
 steps to reproduce. Review logs and captures before sharing them; full
@@ -169,7 +169,7 @@ do not grant rights to the game or its trademarks.
 
 <p align="center">
   <a href="https://estebanpdn.github.io/">Esteban’s Forge</a> ·
-  <a href="https://discord.gg/BjbzfRYpV">Discord</a> ·
+  <a href="https://discord.com/servers/esteban-s-forge-1533248895663210506">Discord</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="docs/legal/CREDITS.md">Credits</a> ·
   <a href="docs/legal/THIRD_PARTY_NOTICES.md">Third-party notices</a><br>
