@@ -74,8 +74,6 @@ Use your own European Super Mario 64 DS dump (**ASMP, revision 0**).
 
 Keep your saves and settings in place. Launch the game, then touch the star on the lower screen to continue.
 
-[![FBI installation QR for the beta-01 CIA](https://github.com/EstebanPdN/sm64ds-3ds/releases/download/beta-01/QR-beta-01-github.png)](https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01)
-
 Use `SHA256SUMS.txt` from the release to verify the downloads. The automated
 hardware tour is disabled in the beta. Keep ROMs, prepared data, firmware,
 saves and dumps private.
