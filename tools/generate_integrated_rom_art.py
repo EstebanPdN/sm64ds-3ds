@@ -54,8 +54,10 @@ def generate(args):
         b=rom[offset:offset+size];spans[name]=dict(offset=offset,size=size,crc32=crc(b),sha256=sha(b));return b
     first,end=fat[ov7[6]];packed=add('overlay7',first,end-first)
     overlay=ndspy.codeCompression.decompress(packed)
-    check(len(overlay)==351456 and overlay==(args.decomp/'extracted/overlays/overlay_0007.bin').read_bytes(),
-          'overlay 7 decoded bytes differ from pinned extraction')
+    check(len(overlay)==351456,'overlay 7 decoded size changed')
+    if not getattr(args, 'rom_only', False):
+        check(overlay==(args.decomp/'extracted/overlays/overlay_0007.bin').read_bytes(),
+              'overlay 7 decoded bytes differ from pinned extraction')
     first,end=fat[222];tex_packed=add('texbank',first,end-first)
     check(tex_packed.startswith(b'LZ77'),'texbank compression changed')
     tex=ndspy.lz10.decompress(tex_packed[4:]);check(len(tex)==210884,'texbank decoded size changed')
@@ -77,7 +79,8 @@ def generate(args):
     check(len(small_palette)==32,'small font palette changed')
     arm9_o,_,arm9_base,arm9_n=struct.unpack_from('<IIII',rom,0x20)
     arm9=ndspy.codeCompression.decompress(rom[arm9_o:arm9_o+arm9_n])
-    check(arm9==(args.decomp/'extracted/arm9_dec.bin').read_bytes(),'ARM9 differs from pinned extraction')
+    if not getattr(args, 'rom_only', False):
+        check(arm9==(args.decomp/'extracted/arm9_dec.bin').read_bytes(),'ARM9 differs from pinned extraction')
     widths8=arm9[0x0208F074-arm9_base:0x0208F174-arm9_base]
     widths16=arm9[0x0208F174-arm9_base:0x0208F274-arm9_base]
     module_path=args.decomp/'tools/message_bank.py'

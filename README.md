@@ -6,7 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="#source-and-installation">Source</a> ·
+  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01">Download beta-01</a> ·
+  <a href="#source-and-installation">Install</a> ·
   <a href="#features">Features</a> ·
   <a href="#documentation">Documentation</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
@@ -17,7 +18,7 @@
 <p align="center">
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/status.svg" alt="Status: in development" height="22"></a>
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/platform.svg" alt="Target: Old and New Nintendo 3DS" height="22"></a>
-  <a href="docs/STATUS.md"><img src="docs/images/badges/build.svg" alt="Latest local test candidate: BUILD 136" height="22"></a>
+  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01"><strong>BUILD 142</strong></a>
   <a href="LICENSE.md"><img src="docs/images/badges/license.svg" alt="Component-specific licenses" height="22"></a>
 </p>
 
@@ -35,10 +36,9 @@ analog movement, a touch interface and configurable camera and presentation.
 
 This project was developed with the help of [OpenAI Codex](https://openai.com/codex/). Learn more about the development process [here](AI_DEVELOPMENT.md).
 
-**In active development; source available, with no public binary release yet.**
-The latest local test candidate is BUILD 136 (native renderer). See
-[Compatibility](docs/COMPATIBILITY.md) for what has been checked and the
-remaining Old/New 3DS hardware qualification.
+[**Download beta-01**](https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01). This first public beta uses
+the native renderer from BUILD 142. It targets Old and New Nintendo 3DS
+systems, with hardware compatibility and performance still under testing.
 
 ## Features
 
@@ -48,7 +48,7 @@ remaining Old/New 3DS hardware qualification.
     <td width="50%" valign="top"><strong>Made for two screens</strong><br>Native upper-screen 3D, stereoscopic presentation and dedicated lower-screen pause and options menus.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><strong>Prepare once, load directly</strong><br>A single .sm64ds companion, prepared locally from your compatible European ROM and read directly from SD.</td>
+    <td width="50%" valign="top"><strong>Prepare once, load directly</strong><br>Game data and renderer banks are prepared locally from your compatible European ROM and read directly from SD.</td>
     <td width="50%" valign="top"><strong>Keep settings and track problems</strong><br>Persistent options, audio controls, backup recovery and a visible BUILD number for reproducible bug reports.</td>
   </tr>
 </table>
@@ -61,26 +61,24 @@ and the [automatic test mode](docs/TEST_MODE.md) used to measure it.
 
 ## Source and installation
 
-The current source is available here; **there are no releases or binary
-downloads yet**. Build instructions and required private inputs are in the
-[build guide](docs/BUILDING.md).
+1. Prepare your own European Nintendo DS dump (**ASMP**, revision **0**) with
+   the [beta-01 data preparation tool](https://github.com/EstebanPdN/sm64ds-3ds/blob/beta-01/tools/native_renderer/README.md).
+2. Copy `prepared.sm64ds`, `native/` and `build142-data.bin` to
+   `SD:/3ds/sm64ds/`. Keep your saves and settings in place.
+3. Install the CIA with FBI or put the 3DSX in `SD:/3ds/sm64ds/` for
+   Homebrew Launcher. Both formats use the same SD data.
+4. Touch the **star** to continue to the original title. The BUILD number
+   appears at the lower left.
 
-A compatible user-supplied **European ASMP revision 0 Nintendo DS ROM** is
-required. No ROM, prepared gameplay archive, firmware, save or raw memory dump
-is included. For a locally built CIA or 3DSX:
+[![FBI installation QR for the beta-01 CIA](https://github.com/EstebanPdN/sm64ds-3ds/releases/download/beta-01/QR-beta-01-github.png)](https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01)
 
-1. Install the CIA with FBI, or launch the 3DSX through Homebrew Launcher.
-2. Put your compatible `.nds` ROM in `SD:/3ds/sm64ds/`, or copy a matching
-   `.sm64ds` companion made with [SM64DS Packer](docs/SM64DS_PACKER.md).
-3. Launch the port and let preparation complete. Preserve existing saves and
-   settings when replacing a test build.
-4. In the original interactive introduction, touch the **star itself** to
-   continue. The BUILD label appears at the lower left of the title, pause
-   menu and options.
+Use `SHA256SUMS.txt` from the release to verify the downloads. The automated
+hardware tour is disabled in the beta. Keep ROMs, prepared data, firmware,
+saves and dumps private.
 
-See [SD data and recovery](docs/SD-DATA.md) before moving files or replacing
-an older build. The integrated game and the historical model viewer have
-different inputs and application IDs; use the integrated ROM-only target.
+The [build guide](docs/BUILDING.md) describes the public source reference and
+its development build. See [SD data and recovery](docs/SD-DATA.md) before
+replacing a previous installation.
 
 ## Controls
 
