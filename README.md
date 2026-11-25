@@ -7,10 +7,10 @@
 
 <p align="center">
   <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01">Download beta-01</a> ·
-  <a href="#source-and-installation">Install</a> ·
+  <a href="https://estebanpdn.github.io/super-mario-64-ds.html#install">Data preparation guide</a> ·
   <a href="#features">Features</a> ·
   <a href="#documentation">Documentation</a> ·
-  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01">Changelog</a> ·
   <a href="CONTRIBUTING.md">Contribute</a> ·
   <a href="#community-and-bug-reports">Community</a>
 </p>
@@ -18,12 +18,16 @@
 <p align="center">
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/status.svg" alt="Status: in development" height="22"></a>
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/platform.svg" alt="Target: Old and New Nintendo 3DS" height="22"></a>
-  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01"><strong>BUILD 142</strong></a>
+  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01"><img src="docs/images/badges/version.svg" alt="Public beta-01" height="22"></a>
   <a href="LICENSE.md"><img src="docs/images/badges/license.svg" alt="Component-specific licenses" height="22"></a>
 </p>
 
 <p align="center">
-  <a href="https://estebanpdn.github.io/"><img src="docs/images/website.svg" alt="Visit Esteban’s Forge" width="142" height="46"></a>
+  <img src="docs/images/showcase-rounded.webp" alt="Yoshi outside Peach’s Castle on the upper screen and the castle grounds map on the touch screen" width="1200">
+</p>
+
+<p align="center">
+  <a href="https://estebanpdn.github.io/super-mario-64-ds.html"><img src="docs/images/website.svg" alt="Visit Esteban’s Forge" width="142" height="46"></a>
   <a href="https://discord.com/servers/esteban-s-forge-1533248895663210506"><img src="docs/images/discord-official.svg" alt="Join our Discord community" width="166" height="46"></a>
   <!-- <a href="https://ko-fi.com/estebanpdn"><img src="docs/images/kofi.svg" alt="Support EstebanPdN on Ko-fi" width="190" height="46"></a> -->
   <a href="https://www.patreon.com/c/EstebanPdN"><img src="docs/images/patreon.svg" alt="Support EstebanPdN on Patreon" width="216" height="46"></a>
@@ -48,7 +52,7 @@ systems, with hardware compatibility and performance still under testing.
     <td width="50%" valign="top"><strong>Made for two screens</strong><br>Native upper-screen 3D, stereoscopic presentation and dedicated lower-screen pause and options menus.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><strong>Prepare once, load directly</strong><br>Game data and renderer banks are prepared locally from your compatible European ROM and read directly from SD.</td>
+    <td width="50%" valign="top"><strong>Prepare once, load directly</strong><br>The CIA prepares your European DS dump on the console. The Homebrew Launcher build reads the files prepared on your computer.</td>
     <td width="50%" valign="top"><strong>Keep settings and track problems</strong><br>Persistent options, audio controls, backup recovery and a visible BUILD number for reproducible bug reports.</td>
   </tr>
 </table>
@@ -61,14 +65,14 @@ and the [automatic test mode](docs/TEST_MODE.md) used to measure it.
 
 ## Source and installation
 
-1. Prepare your own European Nintendo DS dump (**ASMP**, revision **0**) with
-   the [beta-01 data preparation tool](https://github.com/EstebanPdN/sm64ds-3ds/blob/beta-01/tools/native_renderer/README.md).
-2. Copy `prepared.sm64ds`, `native/` and `build142-data.bin` to
-   `SD:/3ds/sm64ds/`. Keep your saves and settings in place.
-3. Install the CIA with FBI or put the 3DSX in `SD:/3ds/sm64ds/` for
-   Homebrew Launcher. Both formats use the same SD data.
-4. Touch the **star** to continue to the original title. The BUILD number
-   appears at the lower left.
+[**Installation and data preparation guide on Esteban’s Forge**](https://estebanpdn.github.io/super-mario-64-ds.html#install)
+
+Use your own European Super Mario 64 DS dump (**ASMP, revision 0**).
+
+- **CIA / HOME Menu.** Copy the extracted `.nds` or a verified `prepared.sm64ds` to `SD:/3ds/sm64ds/`. Install `SM64DS-Beta-01.cia` with FBI. The CIA includes the renderer banks and can prepare your ROM on first launch.
+- **3DSX / Homebrew Launcher.** Run the [beta-01 converter](https://github.com/EstebanPdN/sm64ds-3ds/blob/beta-01/tools/native_renderer/README.md) on your computer. Copy `prepared.sm64ds`, `build142-data.bin`, the entire `native/` folder and the release 3DSX into `SD:/3ds/sm64ds/`.
+
+Keep your saves and settings in place. Launch the game, then touch the star on the lower screen to continue.
 
 [![FBI installation QR for the beta-01 CIA](https://github.com/EstebanPdN/sm64ds-3ds/releases/download/beta-01/QR-beta-01-github.png)](https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01)
 
@@ -168,7 +172,7 @@ do not grant rights to the game or its trademarks.
 ---
 
 <p align="center">
-  <a href="https://estebanpdn.github.io/">Esteban’s Forge</a> ·
+  <a href="https://estebanpdn.github.io/super-mario-64-ds.html">Esteban’s Forge</a> ·
   <a href="https://discord.com/servers/esteban-s-forge-1533248895663210506">Discord</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="docs/legal/CREDITS.md">Credits</a> ·
