@@ -26,6 +26,7 @@ def dialogue_ppu_patch(text):
     return a==0x04000000u?sm64ds::render::dialogue_window_view::dispcnt(value,
         sm64ds::render::dialogue_window_view::owned.load(std::memory_order_acquire)):value;
 }'''
+    replacement32=replacement32.replace("lower_dispcnt(value,", "lower_dispcnt(sm64ds::render::dialogue_window_view::map_display(value),")
     shadow='    if((!g_window_cut_scope || !window_cut_enabled()) && !(eng==ENGINE_B && native_lower_engine_b()))return base;'
     plain_shadow='    if(!g_window_cut_scope || !window_cut_enabled())return base;'
     key=shadow if shadow in text else plain_shadow
@@ -66,7 +67,8 @@ def native_affine_ppu_patch(text,header):
     text=text.replace(guard,'if(!native_affine_consumer && &sm64ds_gpu_affine_ready && !sm64ds_gpu_affine_ready){',1)
     text=text.replace(end,end+'\n'+(ROOT/'tools/native_renderer/ppu_affine_front.inc').read_text(),1)
     header=header.replace(declaration,declaration+'\n// Native map + owned opaque foreground; refuses unsupported pixel effects.\nbool ppu_prepare_native_affine(Engine,Framebuffer& foreground,PpuGpuAffineLayer&);'
-        '\n// BUILD129: bands its OBJs may cover and its overlay base (map upload hints).\nuint32_t ppu_native_affine_bands(const Framebuffer& foreground,const uint32_t** base,uint64_t* base_generation);',1)
+        '\n// BUILD129: bands its OBJs may cover and its overlay base (map upload hints).\nuint32_t ppu_native_affine_bands(const Framebuffer& foreground,const uint32_t** base,uint64_t* base_generation);'
+        '\n// BUILD140: a held image copied another buffer into this one; drop its restore state.\nvoid ppu_native_affine_forget(const Framebuffer& foreground);\n// BUILD142: or inherit the state of the buffer it was copied from.\nvoid ppu_native_affine_clone(const Framebuffer& copy,const Framebuffer& source);',1)
     return text,header
 
 
@@ -270,7 +272,15 @@ def exit_safety_patch(present,entry):
         return text.replace(anchor,replacement,1)
     present=once(present,'void audio_loop(void*){\n    on_worker=true;\n',
         'extern "C" void sm64ds_fatal_handlers_install(void) __attribute__((weak));\n'
+        '// BUILD139: a diagnostic dump freezes the whole game, music included:\n'
+        '// the mixer stops producing and the NDSP channel pauses where it is,\n'
+        '// then resumes from the same sample (sm64ds_audio_freeze).\n'
+        'volatile bool audio_frozen=false,audio_in_pump=false;\n'
         'void audio_loop(void*){\n    on_worker=true;\n    if(sm64ds_fatal_handlers_install)sm64ds_fatal_handlers_install();\n')
+    present=once(present,'        if(audio_pump && audio_ok){\n            const uint64_t t0=svcGetSystemTick();audio_ok=audio_pump();',
+        '        if(audio_pump && audio_ok && !audio_frozen){\n            audio_in_pump=true;__sync_synchronize();\n'
+        '            if(audio_frozen){audio_in_pump=false;svcSleepThread(3000000LL);continue;}\n'
+        '            const uint64_t t0=svcGetSystemTick();audio_ok=audio_pump();audio_in_pump=false;')
     stop=('void player_present_pipeline_stop_audio(){\n'
           '    using namespace present_pipeline;\n'
           '    if(!enabled)return;\n'
@@ -278,6 +288,15 @@ def exit_safety_patch(present,entry):
           '    if(audio_thread){threadJoin(audio_thread,U64_MAX);threadFree(audio_thread);audio_thread=nullptr;}\n'
           '}\n')
     present=once(present,stop,stop+(
+        'extern "C" void sm64ds_audio_freeze(int frozen){\n'
+        '    using namespace present_pipeline;\n'
+        '    if(frozen){\n'
+        '        audio_frozen=true;__sync_synchronize();\n'
+        '        // Let a mix in progress finish (bounded: it never takes 100 ms).\n'
+        '        for(unsigned i=0;i<100&&audio_in_pump;++i)svcSleepThread(1000000LL);\n'
+        '        ndspChnSetPaused(0,true);\n'
+        '    }else{ndspChnSetPaused(0,false);__sync_synchronize();audio_frozen=false;}\n'
+        '}\n'
         '// Exit path (userAppExit): bounded, because an abort can leave the mixer\n'
         '// waiting for a lock its owner will never release. Idempotent.\n'
         'extern "C" void sm64ds_present_pipeline_exit_stop(){\n'
@@ -398,6 +417,167 @@ def affine_memo_patch(text):
     check=(ROOT/'tools/native_renderer/ppu_affine_memo_check.inc').read_text()
     text=text[:at]+check+text[at:]
     return text
+
+def release_ways_patch(ppu,header):
+    """BUILD140: release the second PPU cache ways (~2.5 MB of libc heap per
+    engine) at a scene change. BUILD 139 on the console allocated engine B's
+    way in a 2D title scene, where the heap had room, and never released it:
+    in the castle grounds every model bank load then failed with
+    out_of_memory (no terrain, no sky, Luigi without a body). A way is only
+    re-allocated later if the heap reserve allows it at that moment."""
+    def once(text,anchor,replacement):
+        if text.count(anchor)!=1:raise ValueError('Native PPU way contract changed: '+anchor[:70])
+        return text.replace(anchor,replacement,1)
+    ppu=once(ppu,'void ppu_pin_candidate_ways(bool pinned){\n',(
+        '// BUILD140: frees every unpinned second cache way; the first ways are\n'
+        '// invalidated so the next preparation cannot reuse planes the worker\n'
+        '// last uploaded from a released way. Call only while no job runs.\n'
+        'unsigned ppu_release_extra_cache_ways(){\n'
+        '    unsigned released=0;\n'
+        '    for(unsigned e=0;e<2;++e){auto& w=cache_ways[e];\n'
+        '        if(!w.prepared[1]||w.pinned==1)continue;\n'
+        '        if(prepared_cache[e]==w.prepared[1]||background_cache[e]==w.bg[1]){prepared_cache[e]=w.prepared[0];background_cache[e]=w.bg[0];}\n'
+        '        w.prepared[1]->~PreparedCache();std::free(w.prepared[1]);w.prepared[1]=nullptr;\n'
+        '        w.bg[1]->~BgCandidateCache();std::free(w.bg[1]);w.bg[1]=nullptr;\n'
+        '        w.key[1]=~0u;w.active=0;w.failed=false;\n'
+        '        if(w.prepared[0])w.prepared[0]->valid=false;\n'
+        '        if(w.bg[0])w.bg[0]->valid=false;\n'
+        '        ++released;\n'
+        '    }\n'
+        '    if(released)std::printf("PPU cache way 2 released: ways=%u\\n",released);\n'
+        '    return released;\n'
+        '}\n'
+        'void ppu_pin_candidate_ways(bool pinned){\n'))
+    header=once(header,'void ppu_pin_candidate_ways(bool pinned);\n',
+        'void ppu_pin_candidate_ways(bool pinned);\n'
+        '// BUILD140: frees the unpinned second cache ways (scene change, low heap).\n'
+        'unsigned ppu_release_extra_cache_ways();\n')
+    return ppu,header
+
+
+def gpu_alpha_patch(ppu,header):
+    """BUILD140: in the opening the castle tower's full-screen fog (BLDCNT
+    0x2844, BLDALPHA 0x0808) was blended over the rotating map on the CPU at
+    every refresh (prueba139: 58-69 ms of 2D preparation, 0.77 us per fogged
+    pixel; the tower ran at 17.7 FPS). When EVA+EVB=16 and both the map and
+    the backdrop are second targets, the DS blend is a plain alpha blend:
+    the overlay (and plain semi-transparent OBJs, ppu_affine_front.inc) keep
+    their own colour with alpha EVA/16 and the existing foreground draw,
+    already alpha-blended over the live map, does the blend. No GPU state
+    changes; only texel alpha. The overlay then no longer depends on the
+    map's motion. The PICA blends in 8 bits, the DS in 6: up to 3/255 per
+    channel on blended pixels. sin-recortes.txt keeps the CPU blend."""
+    def once(t,a,b):
+        if t.count(a)!=1:raise ValueError('Native GPU alpha contract changed: '+a[:70])
+        return t.replace(a,b,1)
+    header=once(header,'    uint8_t effect_mode=0,effect_factor=0;bool effect_layer=false,effect_backdrop=false;\n};',
+        '    uint8_t effect_mode=0,effect_factor=0;bool effect_layer=false,effect_backdrop=false;\n    uint8_t gpu_alpha=0; // BUILD140: overlay code bit 4 = GPU blends with EVA/16\n};')
+    mask='    unsigned overlay_mask=0;for(unsigned k=0;k<overlays;++k)overlay_mask|=1u<<overlay_bg[k];\n'
+    ppu=once(ppu,mask,mask+
+        '    const unsigned gpu_eva=std::min(scene.alpha&31u,16u),gpu_evb=std::min((scene.alpha>>8)&31u,16u);\n'
+        '    const uint8_t gpu_alpha=ppu_gpu_alpha()&&native_affine_consumer&&mode==1&&(scene.blend&overlay_mask)&&gpu_eva+gpu_evb==16u&&\n'
+        '        ((scene.blend>>(8+only))&1u)&&(scene.blend&0x2000u)?uint8_t((gpu_eva*255u+8u)/16u):uint8_t(0);\n')
+    ppu=once(ppu,'            if(n!=b.n || blend!=b.blend)return false;','            if(n!=b.n || blend!=b.blend || gpu!=b.gpu)return false;')
+    ppu=once(ppu,'        bool blend=false;uint32_t regs=0,backdrop=0;','        bool blend=false,gpu=false;uint32_t regs=0,backdrop=0;')
+    ppu=once(ppu,'        if(blend1){key.blend=true;key.regs=uint32_t(scene.blend)|(uint32_t(scene.alpha)<<16);key.backdrop=palette[eng][0];key.ref_x=c.ref_x;key.ref_y=c.ref_y;\n'
+                 '            key.pa=int16_t(c.pa);key.pb=int16_t(c.pb);key.pc=int16_t(c.pc);key.pd=int16_t(c.pd);key.wrap=c.wrap;key.affine_generation=layer_cache.generation;key.affine_raster=layer_cache.px.data();}',
+        '        if(blend1){key.blend=true;key.gpu=gpu_alpha!=0;key.regs=uint32_t(scene.blend)|(uint32_t(scene.alpha)<<16);\n'
+        '            if(!key.gpu){key.backdrop=palette[eng][0];key.ref_x=c.ref_x;key.ref_y=c.ref_y;\n'
+        '            key.pa=int16_t(c.pa);key.pb=int16_t(c.pb);key.pc=int16_t(c.pc);key.pd=int16_t(c.pd);key.wrap=c.wrap;key.affine_generation=layer_cache.generation;key.affine_raster=layer_cache.px.data();}}')
+    ppu=once(ppu,'                                    if(!lower){\n','                                    if(!lower&&gpu_alpha){v=(a&0xffffffu)|code[k]|0x10000000u;break;}\n                                    if(!lower){\n')
+    ppu=once(ppu,'    next.overlay=overlay;next.overlay_generation=overlay_generation;\n','    next.overlay=overlay;next.overlay_generation=overlay_generation;next.gpu_alpha=gpu_alpha;\n')
+    ppu=once(ppu,'    if(memo_enabled){\n        auto add=','    if(memo_enabled && s.generation && s.layer[s.current].gpu_alpha!=gpu_alpha)memos[eng].valid=false;\n    if(memo_enabled){\n        auto add=')
+    return ppu,header
+
+
+def gpu_layers_patch(ppu,header):
+    """BUILD141: the opening's scrolling cloud layers on the GPU (see
+    tools/native_renderer/ppu_text_layers.inc). gpu_affine_candidates
+    publishes the text BG layers in front of the native map as raster copies
+    with scroll offsets instead of merging them into the overlay, when every
+    layer shares one priority, a blended layer is the backmost one and blends
+    on the GPU (gpu_alpha), no semi-transparent or bitmap OBJ sits in front
+    of the layers, and no layer changed since the previous call. The OBJ pass
+    (ppu_affine_front.inc) then splits its sprites between the foreground (in
+    front of the layers) and a behind plane."""
+    def once(t,a,b):
+        if t.count(a)!=1:raise ValueError('Native GPU layers contract changed: '+a[:70])
+        return t.replace(a,b,1)
+    header=once(header,'    uint8_t gpu_alpha=0; // BUILD140: overlay code bit 4 = GPU blends with EVA/16\n};',
+        '    uint8_t gpu_alpha=0; // BUILD140: overlay code bit 4 = GPU blends with EVA/16\n'
+        '    // BUILD141: text BG layers the GPU draws over the map, back to front,\n'
+        '    // sampled at (x+hofs, y+vofs) with wrap; text_count>0 means overlay is\n'
+        '    // null and the OBJs of priority > text_priority are in the behind plane.\n'
+        '    struct TextLayer {const uint32_t* raster=nullptr;int width=0,height=0;uint64_t key=0;int hofs=0,vofs=0;};\n'
+        '    TextLayer text[3]{};uint8_t text_count=0,text_priority=0;uint64_t text_epoch=0;\n};')
+    header=once(header,'bool ppu_prepare_native_affine(Engine,Framebuffer& foreground,PpuGpuAffineLayer&);',
+        'bool ppu_prepare_native_affine(Engine,Framebuffer& foreground,PpuGpuAffineLayer&,Framebuffer* behind=nullptr);\n'
+        '// BUILD141: layer copies for the GPU (linear memory on the console when set).\n'
+        'extern void* (*ppu_text_alloc)(size_t);extern void (*ppu_text_free)(void*);\n'
+        'unsigned ppu_release_text_snapshots();')
+    ppu=once(ppu,'static bool native_affine_consumer=false;\n',
+        (ROOT/'tools/native_renderer/ppu_text_layers.inc').read_text()+'static bool native_affine_consumer=false;\n')
+    ppu=once(ppu,'    if(memo_enabled && s.generation && s.layer[s.current].gpu_alpha!=gpu_alpha)memos[eng].valid=false;\n',
+        '    if(memo_enabled && s.generation && s.layer[s.current].gpu_alpha!=gpu_alpha)memos[eng].valid=false;\n'
+        '    if(memo_enabled && s.generation && s.layer[s.current].text_count &&\n'
+        '       (!native_affine_layers || !native_affine_consumer || s.layer[s.current].text_epoch!=text_snapshot_epoch))memos[eng].valid=false;\n'
+        '    // BUILD141: layers that fell back once because they had just changed\n'
+        '    // are tried again on the next call, even over unchanged inputs.\n'
+        '    if(memo_enabled && eng==ENGINE_B && text_retry && native_affine_layers && native_affine_consumer){memos[eng].valid=false;text_retry=false;}\n')
+    ppu=once(ppu,'''        if(!update_text_layer(ocfg[k],o,true) || !o.raster_valid)return std::nullopt;
+    }
+    const uint32_t* overlay=nullptr;uint64_t overlay_generation=0;
+    if(overlays){
+''','''        if(!update_text_layer(ocfg[k],o,true) || !o.raster_valid)return std::nullopt;
+    }
+    PpuGpuAffineLayer::TextLayer text[3]{};uint8_t text_count=0;
+    if(overlays && eng==ENGINE_B && native_affine_consumer && native_affine_layers && ppu_gpu_alpha() && std::getenv("PPU_NO_GPU_LAYERS")==nullptr){
+        bool ok=std::getenv("PPU_REFERENCE_OBJ")==nullptr;
+        for(unsigned k=1;k<overlays;++k)ok=ok && ocfg[k].priority==ocfg[0].priority;
+        // The one blended layer must be the backmost and blend on the GPU.
+        const unsigned blended=blend1?(scene.blend&overlay_mask):0u;
+        if(blended && (!gpu_alpha || blended!=(1u<<overlay_bg[overlays-1])))ok=false;
+        // In front of the layers only plain OBJs (they are not blended there).
+        if(ok && (disp&(1u<<12)))for(unsigned i=0;i<128 && ok;++i){
+            const unsigned a0=rd16(0x07000400u+i*8),a2=rd16(0x07000400u+i*8+4);
+            if(!(a0&0x100) && (a0&0x200))continue;
+            const unsigned objmode=(a0>>10)&3;
+            if(objmode==3 || (objmode==1 && ((a2>>10)&3)<=unsigned(ocfg[0].priority)))ok=false;
+        }
+        // A layer that changed in this call and in the previous one animates:
+        // it stays on the CPU path (no 1 MiB copy per update). A single change
+        // (a fog fade step, new tiles) is copied at once. Copies are thus two
+        // calls apart at least, which the two snapshot buffers rely on.
+        static uint64_t seen_generation[4]{};static uint8_t seen_alpha[4]{};static bool seen_changed[4]{};
+        bool animated=false;
+        for(unsigned k=0;k<overlays;++k){
+            const unsigned bg=overlay_bg[k];const uint8_t alpha=((blended>>bg)&1u)?gpu_alpha:uint8_t(255);
+            const bool changed=cache.layers[bg].generation!=seen_generation[bg] || alpha!=seen_alpha[bg];
+            if(changed && seen_changed[bg])animated=true;
+            seen_changed[bg]=changed;seen_generation[bg]=cache.layers[bg].generation;seen_alpha[bg]=alpha;
+        }
+        if(ok && animated){ok=false;text_retry=true;}
+        for(unsigned k=0;ok && k<overlays;++k){
+            const unsigned j=overlays-1-k,bg=overlay_bg[j];const auto& cfg=ocfg[j];
+            const int w=cfg.tiles_w*8,h=cfg.tiles_h*8;uint64_t key=0;
+            const uint32_t* raster=text_snapshot(bg,cache.layers[bg],w,h,seen_alpha[bg],key);
+            if(!raster){ok=false;break;}
+            text[k].raster=raster;text[k].width=w;text[k].height=h;text[k].key=key;text[k].hofs=cfg.hofs;text[k].vofs=cfg.vofs;
+        }
+        if(ok)text_count=uint8_t(overlays);
+    }
+    const uint32_t* overlay=nullptr;uint64_t overlay_generation=0;
+    if(overlays && !text_count){
+''')
+    ppu=once(ppu,'    next.overlay=overlay;next.overlay_generation=overlay_generation;next.gpu_alpha=gpu_alpha;\n',
+        '    next.overlay=overlay;next.overlay_generation=overlay_generation;next.gpu_alpha=gpu_alpha;\n'
+        '    if(text_count){for(unsigned k=0;k<text_count;++k)next.text[k]=text[k];\n'
+        '        next.text_count=text_count;next.text_priority=uint8_t(ocfg[0].priority);next.text_epoch=text_snapshot_epoch;}\n')
+    ppu=once(ppu,'cur.effect_factor==next.effect_factor && cur.effect_layer==next.effect_layer && cur.effect_backdrop==next.effect_backdrop;',
+        'cur.effect_factor==next.effect_factor && cur.effect_layer==next.effect_layer && cur.effect_backdrop==next.effect_backdrop &&\n'
+        '        text_layers_equal(cur,next) && cur.text_epoch==next.text_epoch;')
+    return ppu,header
+
 
 def ppu_cost_cuts_patch(text):
     """BUILD134: exact cost cuts in pinned PPU code (same outputs).
@@ -578,6 +758,10 @@ def runtime_patches(output):
     exact=' !sm64ds_render60_need_exact() &&' if ' const bool skip_present=!capturing && !sm64ds_render60_need_exact() &&' in text else ''
     text=once(text,' const bool skip_present=!capturing &&'+exact+' consecutive_skips<3 && observed_cadence::behind() &&\n  !(ntr::io_read(0x04000064,4)&0x80000000u) && !ntr::io_display_capture();',
         ' const bool skip_present=sm64ds_fresh_native_enabled()?sm64ds_fresh_native_skip_wanted(capturing)!=0:\n  (!capturing &&'+exact+' consecutive_skips<3 && observed_cadence::behind() &&\n  !(ntr::io_read(0x04000064,4)&0x80000000u) && !ntr::io_display_capture());')
+    # BUILD137: the title overlay's state, read every update, for the hang
+    # watchdog and the test mode's player journey (sm64ds_title_menu_state).
+    text=once(text,' const int result=__real_func_ov007_020b7090(x,y,pressed,invalid,keys);\n'," const int result=__real_func_ov007_020b7090(x,y,pressed,invalid,keys);\n // BUILD137: the title overlay's state for the hang watchdog and the test\n // mode's player journey, read every update (not only with input tracing).\n if(data_ov007_0210342c){const auto* menu_state=*reinterpret_cast<short**>(data_ov007_0210342c+8);\n  if(menu_state){title_menu_state=*menu_state;if(sm64ds_watchdog_menu_state)sm64ds_watchdog_menu_state(*menu_state);}}\n")
+    text=once(text,'static unsigned title_menu_phase;\n','static unsigned title_menu_phase;\nstatic int title_menu_state=-1;\nextern "C" void sm64ds_watchdog_menu_state(int) __attribute__((weak));\n// BUILD137: the title overlay\'s last state (-1 outside the title scene).\nextern "C" int sm64ds_title_menu_state(){return current_scene==1?title_menu_state:-1;}\n')
     patches={name:text}
     name=paths[1];text=originals[name]
     text=once(text,'#include "command_budget.h"\n','#include "command_budget.h"\n#include "native_renderer/game_runtime.h"\n')
@@ -621,11 +805,27 @@ def runtime_patches(output):
         // 0x9E refused 80 with d8e05bf4). A refusal (Homebrew Launcher, an
         // older CIA) keeps the BUILD123 layout: 30% for the mixer.
         fresh_render_core1=sm64ds_fresh_native_enabled()&&core==1&&sm64ds_fresh_native_render_core1_wanted();
-        Result limit=APT_SetAppCpuTimeLimit(fresh_render_core1?80u:sm64ds_fresh_native_enabled()?std::min(percent,30u):percent);
+        // BUILD137: on the Old 3DS the mixer is the only application thread
+        // on core 1. Under the 30% cap the BUILD 133 console tour measured it
+        // busy 77-84% of wall time, with 64-sample chunks stalled up to 76 ms,
+        // longer than the whole NDSP queue: the queue ran dry and the music
+        // fell behind with gaps (owner: "la musica sufre slowdowns"). The cap
+        // is a ceiling, not a reservation: the mixer still takes only what it
+        // needs, and 50% leaves room for its bursts. sdmc:/3ds/sm64ds/
+        // audio-cpu.txt (a number from 30 to 80) overrides it for console A/B.
+        static const unsigned audio_limit=[](){unsigned n=50;
+            if(FILE* f=std::fopen("sdmc:/3ds/sm64ds/audio-cpu.txt","r")){unsigned v=0;if(std::fscanf(f,"%u",&v)==1&&v>=30&&v<=80)n=v;std::fclose(f);}
+            return n;}();
+        const unsigned wanted=fresh_render_core1?80u:sm64ds_fresh_native_enabled()?std::min(percent,audio_limit):percent;
+        Result limit=APT_SetAppCpuTimeLimit(wanted);
         if(fresh_render_core1&&R_FAILED(limit)){
             std::printf("Present pipeline: 80%% of core 1 refused %08lx; render stays on core 0\\n",(unsigned long)limit);
-            fresh_render_core1=false;limit=APT_SetAppCpuTimeLimit(30);
-        }''')
+            fresh_render_core1=false;limit=APT_SetAppCpuTimeLimit(std::min(percent,audio_limit));
+        }
+        // A launcher whose exheader allows less keeps the BUILD123 cap.
+        if(R_FAILED(limit)&&!fresh_render_core1&&sm64ds_fresh_native_enabled()&&std::min(percent,audio_limit)>30u)limit=APT_SetAppCpuTimeLimit(30);
+        {CtrU32 granted=0;APT_GetAppCpuTimeLimit(&granted);
+         std::printf("Present pipeline: core-1 limit asked=%u granted=%lu result=%08lx\\n",wanted,(unsigned long)granted,(unsigned long)limit);}''')
     patches[name]=text
     patches[paths[4]]=dialogue_ppu_patch(originals[paths[4]])
     patches[paths[4]],patches[paths[8]]=native_affine_ppu_patch(patches[paths[4]],originals[paths[8]])
@@ -639,9 +839,12 @@ def runtime_patches(output):
     patches[paths[11]]=lz77_patch(originals[paths[11]])
     patches[paths[3]],patches[paths[5]]=exit_safety_patch(patches[paths[3]],patches[paths[5]])
     patches[paths[4]],patches[paths[12]]=memory_headroom_patch(patches[paths[4]],originals[paths[12]])
+    patches[paths[4]],patches[paths[8]]=release_ways_patch(patches[paths[4]],patches[paths[8]])
     patches[paths[4]]=affine_memo_patch(patches[paths[4]])
     patches[paths[4]]=ppu_cost_cuts_patch(patches[paths[4]])
     patches[paths[4]]=ppu_bug_fixes_patch(patches[paths[4]])
+    patches[paths[4]],patches[paths[8]]=gpu_alpha_patch(patches[paths[4]],patches[paths[8]])
+    patches[paths[4]],patches[paths[8]]=gpu_layers_patch(patches[paths[4]],patches[paths[8]])
     return patches
 
 
@@ -693,7 +896,13 @@ def prepare(output,catalog,install_runtime=False,image_catalog=None,menu_catalog
     if not cmake.resolve().is_relative_to(output) or not destination.resolve().is_relative_to(output):
         raise ValueError('Integration path escaped the generated checkout')
     names=sorted(name for name in sources if name.endswith(('.cpp','.S')))
-    block=MARKER+'    enable_language(ASM)\n    target_sources(smoke_player PRIVATE\n'+''.join(
+    block=MARKER+'''    option(SM64DS_PUBLIC_BETA "Manual play with native banks on SD and the hardware test tour disabled" OFF)
+    if(SM64DS_PUBLIC_BETA)
+        target_compile_definitions(smoke_player PRIVATE SM64DS_PUBLIC_BETA=1)
+    endif()
+    enable_language(ASM)
+    target_sources(smoke_player PRIVATE
+'''+''.join(
         '        platform/3ds/native_renderer/'+name+'\n' for name in names)+''')
     target_include_directories(smoke_player PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/platform/3ds/native_renderer")
     set_property(SOURCE platform/3ds/native_renderer/game_model_pose.cpp APPEND PROPERTY COMPILE_DEFINITIONS SM64DS_NATIVE_AFFINE_ASM=1)
@@ -712,6 +921,7 @@ def prepare(output,catalog,install_runtime=False,image_catalog=None,menu_catalog
         "-Wl,--wrap=hidCstickRead"
         "-Wl,--wrap=irrstCstickRead"
         "-Wl,--wrap=aptMainLoop"
+        "-Wl,--wrap=gxCmdQueueWait"
         "-Wl,--wrap=_ZN5Model8LoadFileER13SharedFilePtr"
         "-Wl,--wrap=func_ov007_020b3f20"
         "-Wl,--wrap=func_ov007_020b3edc"
@@ -804,6 +1014,7 @@ def prepare(output,catalog,install_runtime=False,image_catalog=None,menu_catalog
         "-Wl,--wrap=func_0204af3c"
         "-Wl,--wrap=func_0204be40"
         "-Wl,--wrap=func_0204bbd8"
+        "-Wl,--wrap=_ZN11daPicGate_c6RenderEv"
         "-Wl,--wrap=func_ov007_020b7764"
         "-Wl,--wrap=_ZN8Particle10SysTrackerD1Ev"
         "-Wl,--wrap=func_020190b8"

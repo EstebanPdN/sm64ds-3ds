@@ -205,8 +205,8 @@ El C-Stick controla la camara libre en los modelos que tienen C-Stick.
 DIAGNOSTICO OPCIONAL Y MANUAL
 El paquete deja los volcados de RAM desactivados.
 Entra en pausa > Options > Developer y activa Full RAM dumps.
-L + R + A captura RAM legible del proceso y traza de tiempos; tambien puedes
-usar Dump RAM desde ese menu. Delete dumps pide confirmacion para borrarlos.
+L + R + A guarda dos BMP, un TXT y un ZIP de diagnóstico en dumps/. Para capturar la RAM
+del proceso pulsa A sobre Dump RAM en ese menu. Delete dumps pide confirmacion para borrarlos.
 Show FPS dibuja el contador arriba. Select overlay permite abrir y cerrar el
 panel de diagnostico mediante Select; Select por si solo no genera un dump.
 Los archivos native-*.vm, *.trace y *.anchors.json permanecen en tu SD.

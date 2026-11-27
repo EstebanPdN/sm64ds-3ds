@@ -43,11 +43,11 @@ template<class Sink> void version(Sink& out){
 }
 // Dump progress card (56..184): title, subtitle, bar and warning share
 // equal gaps, with the same 14-16 pixel margins at the top and bottom.
-template<class Sink> void dump(Sink& out,unsigned percent,bool failed=false,bool full=true){
+template<class Sink> void dump(Sink& out,unsigned percent,bool failed=false,bool full=true,bool quick=false){
  if(percent>100)percent=100;
  frame(out,16,56,288,128);
  centered(out,70,failed?"DUMP ERROR":"DUMPING",0xff8d4300,true);
- centered(out,98,failed?"Unable to finish the capture":full?"Saving screens, RAM and VRAM":"Saving screens and VRAM",0xff8d4300);
+ centered(out,98,failed?"Unable to finish the capture":quick?"Saving graphics report":full?"Saving screens, RAM and VRAM":"Saving screens and VRAM",0xff8d4300);
  for(int y=126;y<144;++y)for(int x=32;x<288;++x){uint32_t c=(x==32||x==287||y==126||y==143)?0xff191008:0xff8d4300;if(y>128&&y<141&&x>34&&unsigned(x-35)<250*percent/100)c=y<134?0xffffeb5a:0xffffad00;out.pixel(x,y,c);}
  centered(out,152,"Do not turn off the console",0xff8d4300);
 }

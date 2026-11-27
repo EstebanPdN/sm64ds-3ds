@@ -187,6 +187,7 @@ Error capture_material(const game::RuntimeMaterial& source,const game::SelectedI
     next.state.cull=faces==3?Cull::none:faces==2?Cull::back:Cull::front;
     next.state.blend=alpha==31?Blend::opaque:Blend::alpha;
     next.state.fog=lenient&&carry_fog&&(polygon&0x8000u);
+    next.state.shadow_id=((polygon>>24)&63u)==1u;
     next.state.depth_write=alpha==31 || bool(polygon&(1u<<11));next.state.alpha_cutoff=cutoff;
     if(lenient&&alpha<31)next.state.depth_write=true;
     next.state.tint=0xffffff00u|(alpha*255/31);
@@ -375,7 +376,7 @@ bool same(const Material& a,const Material& b) noexcept {
         a.depth_test==b.depth_test&&a.depth_write==b.depth_write&&a.sample_alpha==b.sample_alpha&&a.alpha_cutoff==b.alpha_cutoff&&
         !std::memcmp(a.uv.data(),b.uv.data(),sizeof(a.uv))&&a.uv_mode==b.uv_mode&&a.fixed_uv.coefficient==b.fixed_uv.coefficient&&
         a.fixed_uv.width==b.fixed_uv.width&&a.fixed_uv.height==b.fixed_uv.height&&a.fixed_uv.offset==b.fixed_uv.offset&&
-        a.tint==b.tint&&a.brightness==b.brightness&&a.fog==b.fog;
+        a.tint==b.tint&&a.brightness==b.brightness&&a.fog==b.fog&&a.shadow_id==b.shadow_id;
 }
 bool same(const PreparedPart& a,const PreparedPart& b) noexcept {
     return !std::memcmp(&a.object_to_clip,&b.object_to_clip,sizeof(Matrix))&&same(a.material,b.material)&&

@@ -12,7 +12,14 @@ HEADER=struct.Struct('<8sIIIIQQIIIIII');REGION=struct.Struct('<6I')
 DEVICE_RANGES=((0x1F000000,0x1F600000),(0x1FF00000,0x1FF80000))
 class MappedCapture:
  def __init__(self,path,*,allow_incomplete=False):
-  self.path=Path(path);self.raw=self.path.read_bytes();self.regions=[]
+  self.path=Path(path);self.raw=self.path.read_bytes();self.regions=[];self.packed=None
+  if self.raw[:8]==b'SM64VMZ1':
+   # Packed (BUILD140+): expand to SM64VM1. A truncated file gives the same
+   # prefix a truncated SM64VM1 would, so the checks below still apply.
+   import sys;tools=str(Path(__file__).resolve().parent)
+   if tools not in sys.path:sys.path.insert(0,tools)
+   from vm_packed import expand_packed
+   self.raw,self.packed=expand_packed(self.raw,allow_incomplete=allow_incomplete)
   if len(self.raw)<HEADER.size:raise ValueError('Missing VM header')
   magic,version,size,word,region_size,begin,end,scene,epoch,count,complete,scan_end,devices=HEADER.unpack_from(self.raw)
   if magic!=b'SM64VM1\0' or version not in (1,2) or (size,word,region_size)!=(64,4,24):raise ValueError('Unknown VM format')

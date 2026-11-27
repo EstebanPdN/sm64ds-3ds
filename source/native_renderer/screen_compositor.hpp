@@ -14,6 +14,8 @@ public:
     ScreenCompositor& operator=(const ScreenCompositor&)=delete;
     Error init(Citro3DBackend&) noexcept;
     Error draw(const ScreenCanvas& top,const ScreenCanvas& bottom) noexcept;
+    bool prepare_right_eye() noexcept;
+    void right_eye(bool right) noexcept {right_pass_=right;}
     Error shutdown() noexcept;
     // Completed RGB8 target readback, after backend.end(), caller-owned linear
     // storage. Portrait BGR layout:240 rows,400/320 columns,128-byte alignment.
@@ -32,6 +34,8 @@ public:
 private:
     Citro3DBackend* owner_=nullptr;
     std::array<C3D_RenderTarget*,2> target_{};
+    C3D_RenderTarget* right_=nullptr;
+    bool right_pass_=false;
     Mesh quad_{};
     bool completed_=false;
     int only_=-1;

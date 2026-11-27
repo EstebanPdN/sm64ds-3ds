@@ -36,7 +36,7 @@ void sm64ds_fresh_native_audio_window(void);
 struct Sm64dsTestPlayer {int present,level,area,character,body,control,dialogue,paused,pause_locked;std::int32_t x,y,z;int angle;};
 void sm64ds_test_game_observe(unsigned scene,Sm64dsTestPlayer* out);
 int sm64ds_test_game_teleport(unsigned scene,int area,std::int32_t x,std::int32_t y,std::int32_t z,int angle);
-void sm64ds_test_game_start_file(int level);
+void sm64ds_test_game_start_file(int level,int area);
 void sm64ds_test_game_set_character(int character);
 // BUILD131: live actors (zone spots and estado_juego.txt). Returns the live
 // total; at most capacity entries are written. "player" marks player actors.

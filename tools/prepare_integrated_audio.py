@@ -33,7 +33,7 @@ def patch_output(text):
     text = once(text,
         'struct Sm64dsSoundOutputState {s16* samples;ndspWaveBuf buffers[3];bool owned[3];};',
         '''struct Sm64dsSoundOutputState {
-    s16* samples=nullptr;ndspWaveBuf buffers[3]{};bool owned[3]{};
+    s16* samples=nullptr;ndspWaveBuf buffers[4]{};bool owned[4]{}; // BUILD137: Sm64dsSoundOutput::Count
     enhance::AudioGainRamp gain;
     enhance::audio_diagnostics::Snapshot metrics;
 };''')
@@ -41,6 +41,9 @@ def patch_output(text):
         'state=static_cast<Sm64dsSoundOutputState*>(std::calloc(1,sizeof(Sm64dsSoundOutputState)));',
         '''state=static_cast<Sm64dsSoundOutputState*>(std::malloc(sizeof(Sm64dsSoundOutputState)));
     if(state)::new(state) Sm64dsSoundOutputState;''')
+    text = once(text, '    state->samples=static_cast<s16*>(linearAlloc(Count*Frames*2*sizeof(s16)));',
+        '''    static_assert(sizeof(state->buffers)/sizeof(state->buffers[0])==Count&&sizeof(state->owned)==Count,"one NDSP buffer per queue slot");
+    state->samples=static_cast<s16*>(linearAlloc(Count*Frames*2*sizeof(s16)));''')
     text = once(text, '    service=&commands;', '''    service=&commands;
     state->gain.reset(enhance::live().audio_volume.load(std::memory_order_relaxed));
     enhance::audio_diagnostics::publish(state->metrics);''')
@@ -50,6 +53,7 @@ def patch_output(text):
         if(state->owned[i])continue;''', '''    // Snapshot completion before refilling. A queue exhausted since its
     // previous submission is a deadline miss; initial prefill is excluded.
     unsigned previously_owned=0,completed_now=0;
+    bool gap_counted=false; // BUILD137 underrun counter
     for(unsigned i=0;i<Count;++i){
         if(!state->owned[i])continue;
         ++previously_owned;
@@ -78,7 +82,12 @@ def patch_output(text):
         DSP_FlushDataCache(buffer.data_pcm16,Frames*2*sizeof(s16));''')
     text = once(text, '''        ndspChnWaveBufAdd(0,&buffer);state->owned[i]=true;++submitted;
     }
-    return true;''', '''        ndspChnWaveBufAdd(0,&buffer);state->owned[i]=true;++submitted;
+    return true;''', '''        // BUILD137: the channel already stopped (every queued buffer played)
+        // when a buffer is added after the prefill: an audible gap.
+        // At most one per pump pass: NDSP updates the playing flag a DSP frame
+        // later, so the next buffers of the same refill still see it stopped.
+        if(!gap_counted&&submitted>=Count&&!ndspChnIsPlaying(0)){gap_counted=true;enhance::audio_diagnostics::timing.underruns.fetch_add(1,std::memory_order_relaxed);}
+        ndspChnWaveBufAdd(0,&buffer);state->owned[i]=true;++submitted;
     }
     state->metrics.submitted=submitted;state->metrics.completed=completed;
     enhance::audio_diagnostics::publish(state->metrics);
@@ -250,6 +259,14 @@ def output_address_patch(text):
     std::printf("Native sound output: state=%p samples=%p bytes=%u\\n",static_cast<void*>(state),static_cast<void*>(state->samples),unsigned(Count*Frames*2*sizeof(s16)));''')
 
 
+def patch_output_header(text):
+    # BUILD137: four 512-sample buffers (62.5 ms) instead of three (47 ms).
+    return once(text, 'static constexpr unsigned Frames=512, Count=3;',
+        '''// BUILD137: four 512-sample buffers (62.5 ms) instead of three (47 ms):
+    // the Old 3DS core-1 mixer outlasted the shorter queue (see player_present).
+    static constexpr unsigned Frames=512, Count=4;''')
+
+
 def prepare(output):
     output = Path(output).resolve()
     if output.is_relative_to((ROOT / 'third_party').resolve()):
@@ -266,6 +283,10 @@ def prepare(output):
     if not header.resolve().is_relative_to(output):
         raise ValueError('Generated audio source must not escape output')
     header_text = patch_native_header(header.read_text())
+    output_header = output / 'port/audio/sound_output_3ds.h'
+    if not output_header.resolve().is_relative_to(output):
+        raise ValueError('Generated audio source must not escape output')
+    output_header_text = patch_output_header(output_header.read_text())
     base = output / 'port/platform/3ds'
     headers = ['audio_gain.hpp', 'audio_diagnostics.hpp']
     for name in headers:
@@ -277,5 +298,6 @@ def prepare(output):
     path.write_text(text)
     native.write_text(native_text)
     header.write_text(header_text)
-    return ['port/audio/sound_output_3ds.cpp', 'port/audio/sound_native.cpp', 'port/audio/sound_native.h',
+    output_header.write_text(output_header_text)
+    return ['port/audio/sound_output_3ds.cpp', 'port/audio/sound_output_3ds.h', 'port/audio/sound_native.cpp', 'port/audio/sound_native.h',
             *['port/platform/3ds/' + name for name in headers]]

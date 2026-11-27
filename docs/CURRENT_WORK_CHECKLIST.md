@@ -1,5 +1,202 @@
 # Current acceptance checklist
 
+## BUILD142 — perfiles Old 3DS y New 3DS, 2026-11-20
+
+New: heap lineal de 32 MiB en el modo de 124 MB, presupuesto de GPU de
+20 MiB, VRAM para el mapa de abajo (un plano del HUD cede la suya) y
+escrituras a la SD en el núcleo 1. Old: el mapa de la intro (nubes que se
+desplazan y ~40 sprites de nubes) cuesta ~3 veces menos y una imagen
+retenida ya no obliga a redibujar el plano entero.
+
+Comprobado (Azahar integrado; no es evidencia de consola):
+
+- [x] CIA New 100 %, Lock 60: recorrido COMPLETO 9/9, 0 fallos del mapa
+  (BUILD 141: 8, todo el 2D de la intro en la CPU); castillo 37,5 -> 58,9
+  FPS, jardines 41,6 -> 59,0.
+- [x] CIA Old 25 %, Lock 60: intro 16,5 -> 23,1 FPS de media (ventanas del
+  log); jardines 28,3 -> 28,7.
+- [x] CIA Old 50 %, Lock 60 y Unlocked: 9/9, 0 fallos; capturas iguales a
+  BUILD 141 salvo el número de build (y el paso 5, que se toma con la intro
+  en marcha y varía entre ejecuciones también en BUILD 141).
+- [x] GPU: Old 9/9 pasos sin estados nuevos (prueba133 + BUILD 139); New sin
+  estados que BUILD 141 New no usara.
+- [x] CTest 113/113; test del mapa (162 publicaciones, scroll y copia
+  retenida); test de recortes de la PPU 4/4 (también contra BUILD 133).
+- [ ] Consola: intro con Lock 30/60/Unlocked; New 3DS si hay una.
+- Pendiente: selección de partida en Old (lógica del juego + malla, ~15 ms
+  por actualización al 50 %) y la carta de Peach (carga y 2D de arriba).
+- CIA SHA-256 `59ed9612b952d86dd368956e1ff6fae01b381b48f0bde769533aa53603954ba1`
+  (53.187.520 bytes), QR en la red local.
+
+## BUILD141 — pantalla de abajo de la intro en la GPU, 2026-11-18
+
+Las capas de nubes (BG0/BG1) y la niebla de la torre (BG2) las dibuja la GPU
+con su desplazamiento; los sprites van en un plano detrás de las capas y otro
+delante. Mismos estados de GPU que el mapa giratorio.
+
+Comprobado (Azahar integrado; no es evidencia de consola):
+
+- [x] .3dsx Old 100 %, Lock 60: recorrido COMPLETO 9/9, 0 cargas fallidas,
+  0 fallos del mapa; capturas idénticas a BUILD 140 (salvo el texto de la
+  versión); GPU: 9/9 pasos sin estados nuevos (prueba133 + BUILD 139).
+- [x] CIA (80 MB) Old 50 %, Lock 60, ventanas de la intro: casi todas 35-57
+  FPS (BUILD 140: 26-33); el tramo más pesado 25-30 como antes.
+- [x] Test de referencia: 62 publicaciones con capas iguales a la PPU de CPU
+  (máx. 3/255 en píxeles mezclados); imagen retenida sin fantasmas.
+- [x] CTest 113/113; audio/guardado PASS.
+- [ ] Consola: FPS de la intro con Lock 30/60/Unlocked.
+- [ ] Aparte (ya en BUILD 140): en modo New 3DS el mapa de abajo falla al
+  publicarse ("allocation failed") y cae al camino de CPU.
+- CIA SHA-256 `5d1df8d80915ef94990686699c95a0868826642ec8fed035b67b26026d4044f2`
+  (53.179.328 bytes), QR en la red local.
+
+## BUILD140 — fallos del informe de consola de BUILD 139, 2026-11-18
+
+Arreglos: jardines sin terreno ni cielo y Luigi sin cuerpo (memoria agotada
+por una segunda vía de caché de la PPU que nunca se liberaba), sombra sobre
+el cuerpo de Yoshi (regla del DS: nada con polygon ID 1 recibe sombra),
+Lock 60/Unlocked clavado en 29,9 (CPU y espera de GPU/LCD contadas aparte;
+la cola de la segunda imagen ya no tira la siguiente actualización),
+estrella del título cargada antes de empezar, transición tras File 1 desde
+blanco, niebla de la torre y sprites translúcidos mezclados por la GPU, y
+volcados comprimidos (SM64VMZ1, LZ4).
+
+Comprobado (Azahar integrado; no es evidencia de consola ni de FPS reales):
+
+- [x] .3dsx, Old al 100 %, Lock 60: recorrido COMPLETO 9/9, 0 cuelgues,
+  0 cargas fallidas; capturas idénticas a BUILD 140 sin el paso de la niebla
+  salvo la pantalla de abajo de la torre (máx. 3/255).
+- [x] CIA (80 MB), Old al 25 %, Lock 60: recorrido COMPLETO 9/9, 0 cargas
+  fallidas; torre de la intro 17,6 FPS (BUILD 139: 15,3; BUILD 137: 8,3);
+  estrella visible durante el fundido del título.
+- [x] CIA al 25 %, Unlocked: COMPLETO 9/9; pares interpolados en los jardines
+  (39 al caminar) sin segunda imagen perdida.
+- [x] Registros al salir del menú nativo: BLDCNT 00bf/00bf, BLDY 16/16.
+- [x] Volcado manual (L+R+A): memory.vm de 8,5 MB (antes 90 MB), 2,4 s;
+  se expande byte a byte; memoria lineal recuperada; el juego sigue.
+- [x] GPU: 9/9 pasos sin estados nuevos frente a prueba133 + las listas de
+  BUILD 139 (que ya corrió esas pantallas en la consola).
+- [x] CTest 113/113 (recortes exactos sin la mezcla por GPU; con ella,
+  17,8 M píxeles dentro de 3/255); audio/guardado PASS.
+- [ ] Consola: jardines con Lock 60 (se esperan ~45-55 FPS), torre de la
+  intro (~22 FPS esperados), terreno/cielo/Luigi, sombra de Yoshi nadando.
+- [ ] Pendiente: los jardines de la intro siguen limitados por el mapa de
+  abajo (nubes que se desplazan, ~22 FPS); el arreglo completo es dibujar
+  las capas de nubes en la GPU (paso 2).
+- CIA SHA-256 `dfad62f76e38eebc7ec9587e458265979da76811645261db8070b01eb3327958`
+  (53.175.232 bytes), QR en la red local.
+
+## BUILD139 — fallos del informe de consola de BUILD 138, 2026-11-18
+
+Arreglos: orden de Opciones (OK/Atrás vuelven a la lista), transiciones sin
+hueco entre imágenes de opciones, volcados que congelan todo (también la
+música) y vigilante con plazo por progreso, sombras que ya no oscurecen a su
+dueño (bit 7 del stencil), guardado y ajustes en segundo plano, mapa de la
+intro a 10 Hz cuando es caro y estimación de la segunda imagen de 60/Unlocked
+que ya no se queda obsoleta.
+
+Comprobado (Azahar integrado; no es evidencia de consola ni de FPS reales):
+
+- [x] CIA, Old al 25 %, Lock 60: recorrido COMPLETO 9/9, 0 cuelgues; intro
+  8,3 → 15,3 FPS. .3dsx Unlocked al 25 %: imágenes intermedias de nuevo (0 →
+  13 en un tramo). .3dsx Lock 60 al 100 %: 58-60 FPS en el juego.
+- [x] Sonda de guardado (SM64DS_DEV_SAVE_PROBE=1): tres guardados seguidos,
+  la versión más nueva en la SD, sin .tmp/.bak sobrantes.
+- [x] Opciones: Display → OK vuelve a Opciones con Display seleccionado.
+- [x] Sombra en el suelo y zapatos de Yoshi sin oscurecer (capturas).
+- [x] CTest 112/112; audio/guardado 8 PASS.
+- [ ] Consola: estados de stencil nuevos (0x105/0x106) nunca ejecutados en la
+  Old; intro, 60/Unlocked y guardado tras la llave.
+- CIA SHA-256 `397eb3111100d5b737f70ed71c38aff17007199ed1f4df0ac3b8afa259c8adf3`
+  (53.158.848 bytes), QR en la red local.
+
+## BUILD138 — cuelgue de GPU en la selección de partida (Old), 2026-11-18
+
+Informe de la consola con BUILD 137 (`dumps/prueba137`, Lock FPS 60): «la GPU
+no responde» en la primera imagen de la selección de partida. Solo la malla
+ondulada de la selección usaba las ramas gris y toon del shader de
+iluminación, que la consola nunca había ejecutado (0 de 10.709 dibujos de
+`dumps/prueba133`). La malla se ilumina ahora en la CPU con la misma
+aritmética (`PreparedVertexLighting`) y se dibuja por la ruta sin luz.
+
+Comprobado (Azahar integrado; no es evidencia de consola):
+
+- [x] Selección de partida: imagen idéntica byte a byte (solo cambia el número
+  de BUILD); todos los dibujos usan ramas ya ejecutadas en la consola
+  (`tools/check_pica_hardware.py`). Todos los pasos del recorrido, también.
+- [x] Recorrido de jugador .3dsx con Lock 60 (ajustes de la consola): COMPLETO,
+  9/9, 0 cuelgues, 168 s.
+- [x] CTest 112/112 (nueva: `native_check_pica_hardware`).
+- [ ] Recorrido de la CIA al 25 % con Lock 60: cortado al empezar porque otra
+  sesión de Code Atlas abrió su juego en el Azahar compartido; la CIA arrancó
+  en modo 80 MB.
+- CIA SHA-256 `b25d9ac071a600d2069736cf7daa0f29552728f0e05e44d9400f1aea6deebda2`
+  (53.158.848 bytes), entregada por QR en la red local.
+
+Pendiente en consola: Adventure → selección → partida con Lock 30, 60 y
+Unlocked; música en el menú.
+
+## BUILD137 — cuelgue de Adventure en la Old, menú, música, vigilante y recorrido de jugador, 2026-11-17
+
+Causa del cuelgue de Adventure (pantalla blanca, música sonando, HOME y POWER
+muertos; abierto desde BUILD 52): en la Old el hilo del juego y el anfitrión
+(0x30) comparten el núcleo 0 con el hilo de render y con el hilo de APT de
+libctru (los dos a 0x31). La actualización de la selección de partida no cabe
+en su tiempo en una Old real, la línea de tiempo fija nunca deja dormir al
+juego y los dos hilos de 0x31 no vuelven a ejecutarse: no hay imagen nueva y
+HOME/POWER no se atienden. Reproducido en Azahar con la CPU al 25 % (0,2 FPS
+en la selección; el log tampoco se escribía).
+
+Arreglos: juego a 0x32 (bajo APT), espera acotada al render tras 3
+actualizaciones sin imagen con la línea de tiempo aplazada, esperas de HOME,
+cierre y GPU acotadas (`--wrap=gxCmdQueueWait`, GPU marcada inutilizable si no
+responde), log con búfer desde la primera actualización, productores del menú
+fuera de las actualizaciones descartadas, malla de la selección convertida una
+vez por punto, mezclador al 50 % del núcleo 1 y cola de 4 búferes, contador de
+vaciados reales, vigilante de cuelgues y recorrido de jugador
+(L+SELECT+START). `SetThreadPriority` añadido al RSF.
+
+Comprobado (Azahar integrado de Code Atlas; no es evidencia de consola ni de FPS):
+
+- [x] CPU al 25 % (Old): la selección de partida pasa de 0,2 a 7-13 FPS; el
+  recorrido de jugador completo (título → puerta del castillo) termina:
+  9/9 informes, 0 cuelgues, 181 s (repetido tras la revisión: igual, 8 FPS en
+  la selección).
+- [x] Old al 100 %: recorrido COMPLETO, 9/9, 0 cuelgues, 164 s; New al 100 %:
+  COMPLETO, 9/9, 0 cuelgues, 162 s.
+- [x] Bob-omb (12 situaciones, Old): 24/24 capturas idénticas byte a byte a
+  BUILD 136.
+- [x] Vigilante: render colgado a propósito → `cuelgue-01.txt` (render 16 s en
+  «espera_GPU»), log pendiente y 19 MB de memoria; juego colgado a propósito →
+  «el juego no avanza» a los 15 s.
+- [x] CIA final (modo 80 MB, Old al 100 %, núcleo 1 al 50 % concedido):
+  recorrido COMPLETO, 9/9, 0 cuelgues, 0 vaciados de audio, 163 s. SHA-256
+  `b892a4773a1be468a0c599b81e36747922d3587829828ebfe742224c1fb71432`
+  (53.154.752 bytes; ELF verificado byte a byte), entregada por QR en la red
+  local.
+- [x] Revisión adversarial (10 revisores): aplicados todos los hallazgos
+  confirmados o plausibles salvo dos, entre ellos la espera GX acotada por progreso de la
+  cola (no por tiempo), la pausa del proceso, el plazo de 60 s de los
+  informes, el cierre por APT antes de `svcExitProcess`, el motivo «la GPU no
+  responde» y que el propio informe del vigilante no cuente como pausa.
+  Quedan sin aplicar dos de prioridad baja: distinguir el hilo anfitrión del
+  del juego en los informes, y vigilar el resto de la transición a HOME
+  después de nuestro gancho.
+- [x] Pruebas de ordenador: 111/111 de CTest (nuevas: recorrido con cuatro
+  ángulos de cámara y puerta abierta/cerrada; malla de la selección idéntica a
+  la anterior en 200 mallas aleatorias), herramientas y audio/guardado (cola de
+  4 búferes y vaciados reales).
+
+Pendiente en consola (Old):
+
+- [ ] Adventure → selección de partida sin pantalla blanca; HOME y POWER
+  responden siempre (también durante cargas).
+- [ ] Música sin cortes en menús (`audioUnderrunsTotal` en el log; A/B con
+  `audio-cpu.txt` 30/50/80).
+- [ ] FPS del menú y de la selección en la Old real (los informes del recorrido
+  de jugador los miden).
+- [ ] Cierre de emergencia del vigilante con HOME (Azahar no envía HOME).
+
 ## BUILD136 — BUILD 135 recompilada desde el código publicado, 2026-11-15
 
 Primera versión compilada desde el código subido a GitHub (rama

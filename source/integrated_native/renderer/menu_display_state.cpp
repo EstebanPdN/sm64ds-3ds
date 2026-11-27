@@ -184,4 +184,15 @@ extern "C" void __wrap_func_ov007_020c03b0(void* p){
     __real_func_ov007_020c03b0(p);
     if(active&&clock_source)stats.background_group_ticks+=clock_source()-start;
 }
+namespace sm64ds::render::game_hooks {
+void menu_display_commit_registers() noexcept {
+    const auto& s=display.snapshot();
+    for(unsigned e=0;e<2;++e){const auto& effect=s.effect[e];if(!effect.known)continue;
+        void* port=reinterpret_cast<void*>(std::uintptr_t(e?0x04001050u:0x04000050u));
+        if(effect.mode==DisplayEffect::brightness)__real__ZN3G2x18SetBlendBrightnessEPVtts(port,effect.first,effect.amount);
+        else if(effect.mode==DisplayEffect::alpha)__real__ZN3G2x13SetBlendAlphaEPVttttj(port,effect.first,effect.second,effect.alpha_a,effect.alpha_b);
+        else *static_cast<volatile std::uint16_t*>(port)=0; // disabled effect (func_ov007_020c897c modes 2-4)
+    }
+}
+}
 #endif

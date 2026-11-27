@@ -228,7 +228,10 @@ def dump(folder,args,lines):
         kinds=collections.Counter(r['id_actor'] for r in rows)
         lines.append(f"- actores: {len(rows)} vivos, {len(kinds)} tipos; mas frecuentes: "+', '.join(f'{k}x{c}' for k,c in kinds.most_common(8)))
     if (folder/'memoria.vm').exists():
-        lines.append(f"- memoria.vm: {(folder/'memoria.vm').stat().st_size/1048576:.1f} MiB (tools/inspect_integrated_vm.py con el ELF de este BUILD)")
+        with (folder/'memoria.vm').open('rb') as f:packed=f.read(8)==b'SM64VMZ1'
+        kind=('empaquetada (SM64VMZ1, LZ4; inspect_integrated_vm.py la lee tal cual, --expand SALIDA da el SM64VM1)' if packed
+              else 'SM64VM1 sin empaquetar')
+        lines.append(f"- memoria.vm: {(folder/'memoria.vm').stat().st_size/1048576:.1f} MiB {kind} (tools/inspect_integrated_vm.py con el ELF de este BUILD)")
     if (folder/'gpu_estado.txt').exists():
         text=(folder/'gpu_estado.txt').read_text(errors='replace')
         keep=[l for l in text.splitlines() if l.startswith(('lineal_libre','vram_libre','fallos_carga','rechazados','ocurrencias_saltadas'))]

@@ -9,6 +9,84 @@ modo de prueba de Worms 3D. Desde BUILD 114, SELECT+START recorre solo
 uno. La prueba de un solo punto de BUILD 113 sigue disponible con
 R+SELECT+START.
 
+## Novedades de BUILD 137 (comprobadas en Azahar; en consola, sin probar)
+
+### Recorrido de jugador (L+SELECT+START)
+
+Juega como una persona desde el título, en una partida nueva propia
+(`prueba/partida.sav`; la partida del dueño no se toca):
+
+1. pantalla de título (toca TOUCH TO START),
+2. menú principal (toca Adventure),
+3. selección de partida (aquí se colgaba la Old desde BUILD 52; toca File A),
+4. la intro entera, mirada sin saltarla (la carta y la cámara del castillo;
+   un texto solo se pasa con A cuando espera a A, como un lector),
+5. el primer control de Yoshi (lee lo que dice Lakitu),
+6. camina por los jardines hasta la puerta del castillo,
+7. empuja la puerta: en una partida nueva está **cerrada** (la llave la tiene
+   el conejo de los jardines, que el recorrido todavía no persigue). Ahí
+   termina la fase 1.
+
+Un informe por paso (9 en total) en `prueba/NN/jugador/`: captura de las dos
+pantallas, CSV de cuadros, resumen con FPS, p95, audio y el estado del juego.
+Al final, `resultado.txt` dice COMPLETO o INCOMPLETO (y por qué), cuántos
+textos se pasaron, cuántos saltos hizo al atascarse, y **cuántos cuelgues
+detectó el vigilante**. LED verde si todo fue bien; rojo si algo falló o hubo
+un cuelgue. START cancela; en el panel final, START reinicia el juego.
+
+En Azahar (Old, CPU al 100 %): COMPLETO en 164 s, 9/9 informes, 0 cuelgues.
+
+Si el juego se cuelga durante el recorrido, el siguiente arranque escribe
+`RECORRIDO DE JUGADOR NO TERMINO` en `resultado.txt` y guarda el log del
+arranque colgado en `jugador/registro_cuelgue.txt`.
+
+### Vigilante de cuelgues (siempre activo, también fuera del modo de prueba)
+
+Un hilo de alta prioridad mira cada 250 ms si el juego, la imagen y el
+sistema (HOME/POWER) siguen avanzando. Si algo se detiene escribe en
+`sdmc:/3ds/sm64ds/cuelgues/`:
+
+| Archivo | Qué contiene |
+|---|---|
+| `cuelgue-NN.txt` | Motivo, escena, estado del menú, en qué estaba cada hilo y desde cuándo, contadores, audio, GPU y las últimas 64 migas de pan |
+| `cuelgue-NN-log.txt` | Las líneas del log que aún no estaban escritas en la SD |
+| `cuelgue-NN-memoria.bin` | La memoria global del juego (el bloque de .data/.bss, unos 19 MB y como mucho 32 MB, sin cabecera; la base va en el `.txt`). El informe del cierre de emergencia no la incluye |
+
+Además el LED se pone rojo. Motivos: la imagen no cambia 6 s mientras el
+juego avanza; el juego no avanza 15 s; HOME/POWER no se atienden 15 s;
+HOME o POWER llevan 5 s pulsados sin respuesta; la GPU no completa nada
+durante 2 s (20 tramos seguidos de 100 ms sin que avance la cola GX: una
+cola larga que sí avanza no cuenta); un informe o volcado del modo de prueba
+lleva más de 60 s. Si la consola se suspende (tapa cerrada) o el proceso
+entero se detiene más de 2 s, el vigilante lo ve como una pausa y vuelve a
+contar desde cero, sin informe.
+
+Si HOME o POWER se pulsan y el juego no puede atenderlos durante 20 s, el
+vigilante cierra el juego para que vuelva el menú HOME (en vez de tener que
+apagar la consola): primero pide el cierre normal al sistema (APT) desde un
+hilo preparado al arrancar y, si en 1,5 s no ha cerrado, termina el proceso.
+`sdmc:/3ds/sm64ds/cuelgue-sin-salida.txt` (archivo vacío) desactiva ese
+cierre. El cierre de emergencia no se puede probar en Azahar (no envía HOME
+al juego): queda por comprobar en consola.
+
+Si la GPU deja de responder, el juego la marca como inutilizable y deja de
+enviarle trabajo en vez de quedarse esperando: la imagen se congela, pero
+HOME sigue funcionando y queda el informe.
+
+### Interruptores y desarrollo
+
+| Archivo en `sdmc:/3ds/sm64ds/` | Efecto |
+|---|---|
+| `audio-cpu.txt` | Un número de 30 a 80: porcentaje del núcleo 1 para el mezclador (por defecto 50; BUILD 136 usaba 30) |
+| `cuelgue-sin-salida.txt` | El vigilante informa pero nunca cierra el juego |
+
+Solo .3dsx con `env.txt` (la CIA no lo lee): `SM64DS_DEV_FAULT=hang-render:N`
+o `hang-game:N` cuelgan a propósito el hilo de render o el del juego en la
+actualización N (para probar el vigilante); `SM64DS_PRUEBA_POSICION=1`
+escribe cada segundo escena, estado del menú y posición (`=2` añade los
+actores cercanos); con `SM64DS_PRUEBA_RUTA=1`, `prueba/ruta.txt` (líneas
+`x z radio`) cambia la ruta de los jardines.
+
 ## Novedades de BUILD 135 (comprobadas en Azahar; en consola, sin probar)
 
 - Los volcados de un recorrido con Lock FPS 60 describen la imagen

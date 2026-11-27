@@ -1,6 +1,6 @@
 #pragma once
 #include <cstdint>
-// Developer chords: L+R+A full dump, L+R+B partial dump (no RAM), L+R+X
+// Developer chords: L+R+A graphics capture, L+R+B partial dump (no RAM), L+R+X
 // delete dumps. L has no game function; while it is held, the chord keys
 // never reach the game either. Bits match libctru's KEY_* values.
 namespace developer_keys {

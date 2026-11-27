@@ -1,3 +1,4 @@
+extern "C" int sm64ds_gpu_unusable(void) __attribute__((weak));
 #include "scene_renderer.hpp"
 #include "shadow_volumes.hpp"
 #include "perf_switch.hpp"
@@ -10,7 +11,7 @@ namespace sm64ds::render {
 Error SceneRenderer::init(ModelCatalog catalog,const char* directory,const void* shader,std::size_t bytes,std::size_t budget,bool timings,bool prefer_affine,ImageCatalog images,CanvasCatalog canvases,bool antialias) noexcept {
     if(ready_||c3d_owned_)return Error::invalid_phase;
     if((!catalog.size()&&!images.size()&&!canvases.size())||!directory||!directory[0]||std::strlen(directory)>=sizeof(directory_))return Error::invalid_data;
-    if(!C3D_Init(256*1024))return Error::gpu_failure;
+    if(!C3D_Init(512*1024))return Error::gpu_failure;
     c3d_owned_=true;
     auto error=backend_.init(shader,bytes,budget,timings,prefer_affine);
     if(error!=Error::none){C3D_Fini();c3d_owned_=false;return error;}
@@ -307,7 +308,88 @@ Error SceneRenderer::prepare(const SceneView& scene) noexcept {
     }
     return Error::none;
 }
+// The queued look-ahead loads. Callers own the GPU frame: draw() after
+// prepare() has protected the visible frame's resources, or warm().
+void SceneRenderer::run_preloads() noexcept {
+    for(unsigned i=0;i<preload_count_;++i){
+        const auto request=preload_[i];const auto id=request.id;
+        if(request.kind==PreloadKind::canvas){
+            auto* slot=find_canvas(id);
+            if(slot&&slot->model.geometry_ready())continue;
+            if(!slot)for(auto& item:canvas_resident_)if(!item.binding){slot=&item;break;}
+            if(!slot){std::printf("Native preload skipped: canvas=%lu no free slot\n",(unsigned long)id);continue;}
+            const auto* binding=canvases_.find(id);const bool pinned=slot->pinned;slot->pinned=true;
+            const auto loaded=load(*slot,*binding);
+            if(loaded!=Error::none){slot->model.reset();slot->binding=nullptr;}
+            slot->pinned=pinned;
+            std::printf("Native preload: canvas=%lu serial=%llu status=%s\n",(unsigned long)id,(unsigned long long)serial_,describe(loaded));
+            continue;
+        }
+        if(request.kind==PreloadKind::image_bank){
+            auto* slot=find_images(id);
+            if(!slot)for(auto& item:image_resident_)if(!item.binding){slot=&item;break;}
+            if(!slot){std::printf("Native preload skipped: images=%lu no free slot\n",(unsigned long)id);continue;}
+            const auto* binding=images_.find(id);const bool resident=slot->binding!=nullptr;
+            const bool pinned=slot->pinned;slot->pinned=true;slot->required.fill(false);
+            bool missing=false;
+            for(unsigned n=0;n<binding->images;++n){slot->required[n]=true;missing|=!slot->images.image(n);}
+            const auto loaded=missing?load(*slot,*binding):Error::none;
+            // NativeImages stages additions; speculative failure cannot
+            // destroy textures already referenced by this visible frame.
+            if(loaded!=Error::none&&!resident){slot->images.reset();slot->binding=nullptr;}
+            slot->pinned=pinned;
+            std::printf("Native preload: images=%lu serial=%llu status=%s\n",(unsigned long)id,(unsigned long long)serial_,describe(loaded));
+            continue;
+        }
+        auto* slot=find(id);
+        if(request.kind==PreloadKind::model_images){
+            if(!slot)for(auto& item:resident_)if(!item.binding){slot=&item;break;}
+            if(!slot){std::printf("Native preload skipped: modelImages=%lu no free slot\n",(unsigned long)id);continue;}
+            const auto* binding=catalog_.find(id);const bool resident=slot->binding!=nullptr;
+            const bool pinned=slot->pinned,geometry=slot->required_geometry;
+            slot->pinned=true;slot->required_geometry=false;slot->required_images={};
+            bool missing=false;
+            for(unsigned n=0;n<binding->images;++n){slot->required_images[n/32]|=1u<<(n%32);missing|=!slot->model.image(n);}
+            const auto loaded=missing?load(*slot,*binding):Error::none;
+            if(loaded!=Error::none&&!resident){slot->model.reset();slot->binding=nullptr;}
+            slot->pinned=pinned;slot->required_geometry=geometry;
+            std::printf("Native preload: modelImages=%lu serial=%llu status=%s\n",(unsigned long)id,(unsigned long long)serial_,describe(loaded));
+            continue;
+        }
+        if(slot&&slot->model.geometry_ready())continue;
+        // A visible image-only bank must not be destructively promoted by
+        // speculation: failure would lose textures needed by this frame.
+        if(slot&&slot->pinned){std::printf("Native preload skipped: model=%lu visible image bank\n",(unsigned long)id);continue;}
+        if(!slot)for(auto& item:resident_)if(!item.binding){slot=&item;break;}
+        if(!slot){std::printf("Native preload skipped: model=%lu no free slot\n",(unsigned long)id);continue;}
+        const auto* binding=catalog_.find(id);slot->required_geometry=true;slot->pinned=true;
+        const auto loaded=load(*slot,*binding);
+        std::printf("Native preload: model=%lu serial=%llu status=%s\n",(unsigned long)id,(unsigned long long)serial_,describe(loaded));
+        if(loaded!=Error::none){slot->model.reset();slot->binding=nullptr;slot->pinned=false;}
+    }
+    preload_count_=0;
+}
+// BUILD140: run the queued look-ahead now, outside any visible frame, for
+// `scene` (adopted, so its first draw keeps these residents). The title's
+// first job loaded 1.6 s of menu banks on the Old 3DS: the star's sound
+// played ~1.9 s before the star. Only while no render job runs.
+Error SceneRenderer::warm(std::uint64_t scene) noexcept {
+    if(!ready_||!backend_.between_frames())return Error::invalid_phase;
+    auto error=backend_.begin(false);if(error!=Error::none)return error; // same pattern as finish()
+    if(!have_scene_||scene_!=scene){ // the same reset draw() applies, after the fence
+        for(auto& item:resident_){item.model.reset();item.binding=nullptr;item.pinned=false;}
+        for(auto& item:image_resident_){item.images.reset();item.binding=nullptr;item.pinned=false;}
+        for(auto& item:canvas_resident_){item.model.reset();item.binding=nullptr;item.pinned=false;}
+        scene_=scene;have_scene_=true;
+    }
+    run_preloads();
+    return backend_.end();
+}
+// BUILD140: the game thread frees host caches (PPU cache ways) on request;
+// the failed load is retried at the next image. Weak: labs link without it.
+extern "C" void sm64ds_render_memory_pressure() __attribute__((weak));
 void SceneRenderer::record_load_failure(std::uint32_t bank,Error error) noexcept {
+    if(error==Error::out_of_memory&&sm64ds_render_memory_pressure)sm64ds_render_memory_pressure();
     const bool changed=metrics_.failed_bank!=bank||metrics_.load_error!=error;
     ++metrics_.load_failures;metrics_.failed_bank=bank;metrics_.load_error=error;
     if(changed||metrics_.load_failures<=3)std::printf("Native bank FAILED: bank=%lu error=%s failures=%llu serial=%llu linearFree=%u appFree=%u\n",
@@ -396,14 +478,31 @@ Error SceneRenderer::upload_plane(unsigned index,const std::uint32_t* argb,Textu
 Error SceneRenderer::initialize_map_surfaces() noexcept {
     if(map_sharp_)return Error::none;
     map_drawn_=false;map_dirty_=true;
-    auto error=backend_.create_surface(256,256,false,map_surface_);
-    if(error==Error::none)error=backend_.create_surface(512,512,false,map_sharp_,true);
-    if(error!=Error::none){
+    for(;;){
+        auto error=backend_.create_surface(256,256,false,map_surface_);
+        if(error==Error::none)error=backend_.create_surface(512,512,false,map_sharp_,true);
+        if(error==Error::none)return error;
         if(map_sharp_)backend_.destroy(map_sharp_);
         if(map_surface_)backend_.destroy(map_surface_);
         map_sharp_=map_surface_={};
+        // BUILD142: VRAM must hold the map's targets. With the New 3DS's
+        // supersampled scene (2 MiB) the top HUD planes left 1.5 MB in
+        // pieces and the map failed on every try: its CPU fallback cost the
+        // game thread ~10 ms per update. A HUD plane has a cheap CPU path
+        // (its 2x copy in linear memory): it gives its VRAM target up.
+        if(error!=Error::out_of_memory||!release_bridge_target())return error;
     }
-    return error;
+}
+bool SceneRenderer::release_bridge_target() noexcept {
+    for(unsigned k=2;k-->0;){
+        if(bridge_path_[k]!=BridgePath::gpu||!bridge_texture_[k])continue;
+        if(backend_.destroy(bridge_texture_[k])!=Error::none)return false;
+        bridge_texture_[k]={};bridge_path_[k]=BridgePath::cpu;
+        bridge_surface_ready_[k]=false;bridge_expand_[k]=false;frame_shadow_valid_[k]=false;
+        std::printf("Native 2D plane %u: VRAM target released for the map (CPU path) vramFree=%u\n",k,unsigned(vramSpaceFree()));
+        return true;
+    }
+    return false;
 }
 Error SceneRenderer::ensure_screen_quad() noexcept {
     if(map_quad_)return Error::none;
@@ -478,8 +577,17 @@ Error SceneRenderer::expand_bridge_planes() noexcept {
     }
     return Error::none;
 }
+namespace {
+// BUILD142: which map step failed (New 3DS: "allocation failed" on every try).
+void map_failure(const char* step,Error error,unsigned width,unsigned height) noexcept {
+    static unsigned reported=0;if(++reported>12)return;
+    std::printf("Native map step failed: step=%s status=%s size=%ux%u linearFree=%u vramFree=%u\n",step,describe(error),width,height,
+        unsigned(linearSpaceFree()),unsigned(vramSpaceFree()));
+}
+}
 Error SceneRenderer::upload_map(const AffineImage& image) noexcept {
     Error error=ensure_screen_quad();
+    if(error!=Error::none)map_failure("quad",error,0,0);
     if(error!=Error::none)return error;
     if(map_identity_!=image.pixels||map_generation_!=image.generation){
         // BUILD123: a large map raster (512x512, 1 MiB) can meet a full GPU
@@ -492,7 +600,15 @@ Error SceneRenderer::upload_map(const AffineImage& image) noexcept {
             if((error!=Error::budget&&error!=Error::capacity&&error!=Error::out_of_memory)||!evict())break;
         }
         if(error==Error::none){map_identity_=image.pixels;map_generation_=image.generation;map_dirty_=true;}
+        else map_failure("raster",error,image.width,image.height);
     }
+    // BUILD141: a held map (same serial as the last upload) holds the same
+    // foreground, behind plane and layers: nothing to compare or upload.
+    if(error==Error::none&&image.serial&&image.serial==map_uploaded_serial_&&map_foreground_&&(!image.layers||map_behind_)){
+        if(image.layers)map_layerless_=0;
+        return Error::none;
+    }
+    map_uploaded_serial_=0;
     // BUILD129: over the same base, the new foreground can differ from the
     // published one only inside the OBJ bands of either; every other band is
     // equal by construction (ppu_native_affine_bands) and skips its compare.
@@ -501,18 +617,57 @@ Error SceneRenderer::upload_map(const AffineImage& image) noexcept {
        map_hint_base_==image.foreground_base&&map_hint_generation_==image.foreground_base_generation)
         candidates=map_hint_bands_|image.foreground_bands;
     bool foreground_changed=true;
-    if(error==Error::none)error=upload_plane(4,image.foreground,map_foreground_,false,&foreground_changed,candidates);
+    if(error==Error::none){error=upload_plane(4,image.foreground,map_foreground_,false,&foreground_changed,candidates);
+        if(error!=Error::none)map_failure("foreground",error,256,192);}
     if(error!=Error::none||foreground_changed)map_dirty_=true;
+    // BUILD141: text layers, uploaded only when their pixels change (the
+    // scroll is a texture offset), and the plane of OBJs behind them, which
+    // shares the foreground's boxes and so its band hint.
+    for(unsigned k=0;error==Error::none&&k<image.layers;++k){
+        const auto& layer=image.layer[k];
+        if(map_layer_identity_[k]==layer.pixels&&map_layer_key_[k]==layer.key&&map_layer_[k])continue;
+        for(;;){
+            error=backend_.upload_map_image(layer.pixels,layer.width,layer.height,map_layer_[k]);
+            if((error!=Error::budget&&error!=Error::capacity&&error!=Error::out_of_memory)||!evict())break;
+        }
+        if(error==Error::none){map_layer_identity_[k]=layer.pixels;map_layer_key_[k]=layer.key;map_dirty_=true;}
+        else{map_layer_identity_[k]=nullptr;map_layer_key_[k]=0;map_failure("layer",error,layer.width,layer.height);}
+    }
+    if(error==Error::none&&image.layers&&image.behind){
+        bool behind_changed=true;
+        error=upload_plane(5,image.behind,map_behind_,false,&behind_changed,candidates);
+        if(error!=Error::none)map_failure("behind",error,256,192);
+        if(error!=Error::none||behind_changed)map_dirty_=true;
+    }
+    // Layer textures (1 MiB each) are released after 90 maps without layers
+    // (a single CPU-path map, while a layer animates, keeps them).
+    if(image.layers)map_layerless_=0;else if(map_layerless_<1000)++map_layerless_;
+    if(error==Error::none&&!image.layers&&map_layerless_>=90){
+        for(unsigned k=0;k<map_layer_.size();++k)if(map_layer_[k]){
+            if(backend_.destroy(map_layer_[k])==Error::none){map_layer_[k]={};map_layer_identity_[k]=nullptr;map_layer_key_[k]=0;}}
+        if(map_behind_&&backend_.destroy(map_behind_)==Error::none){map_behind_={};frame_shadow_valid_[5]=false;std::free(frame_shadow_[5]);frame_shadow_[5]=nullptr;}
+    }
+    if(error==Error::none)map_uploaded_serial_=image.serial;
     map_hint_valid_=error==Error::none;
     map_hint_base_=image.foreground_base;map_hint_generation_=image.foreground_base_generation;map_hint_bands_=image.foreground_bands;
     return error;
+}
+namespace {
+bool same_layers(const AffineImage& a,const AffineImage& b) noexcept {
+    // The behind plane's pixels (one buffer per store) are compared by its
+    // upload, which marks the map dirty when they change: not its address.
+    if(a.layers!=b.layers)return false;
+    for(unsigned k=0;k<a.layers;++k){const auto& x=a.layer[k];const auto& y=b.layer[k];
+        if(x.pixels!=y.pixels||x.key!=y.key||x.width!=y.width||x.height!=y.height||x.hofs!=y.hofs||x.vofs!=y.vofs)return false;}
+    return true;
+}
 }
 Error SceneRenderer::draw_map(const AffineImage& image) noexcept {
     const auto& last=map_drawn_image_;
     if(map_drawn_&&!map_dirty_&&map_sharp_&&last.pixels==image.pixels&&last.generation==image.generation&&
        last.width==image.width&&last.height==image.height&&last.x==image.x&&last.y==image.y&&
        last.xx==image.xx&&last.xy==image.xy&&last.yx==image.yx&&last.yy==image.yy&&
-       last.backdrop==image.backdrop&&last.wrap==image.wrap)return Error::none;
+       last.backdrop==image.backdrop&&last.wrap==image.wrap&&same_layers(last,image))return Error::none;
     map_drawn_=false;
     const auto error=draw_map_passes(image);
     if(error==Error::none){map_drawn_=true;map_dirty_=false;map_drawn_image_=image;}
@@ -528,6 +683,20 @@ Error SceneRenderer::draw_map_passes(const AffineImage& image) noexcept {
     material.wrap_s=material.wrap_t=image.wrap?Wrap::repeat:Wrap::transparent_border;
     material.uv=affine_image_uv(image);
     if(error==Error::none)error=backend_.draw(map_quad_,material,pose);
+    // BUILD141: OBJs behind the text layers, then the layers back to front
+    // (the map raster's own material: RGBA8, nearest, repeat, alpha blend).
+    if(image.layers&&image.behind&&map_behind_){
+        material=screen_material();material.texture=map_behind_;material.blend=Blend::alpha;
+        material.uv={1,0,0,0,192.f/256,0};
+        if(error==Error::none)error=backend_.draw(map_quad_,material,pose);
+    }
+    for(unsigned k=0;k<image.layers;++k){
+        const auto& layer=image.layer[k];if(!map_layer_[k])return Error::invalid_data;
+        AffineImage scroll{};scroll.width=layer.width;scroll.height=layer.height;scroll.x=layer.hofs*256;scroll.y=layer.vofs*256;
+        material=screen_material();material.texture=map_layer_[k];material.blend=Blend::alpha;
+        material.wrap_s=material.wrap_t=Wrap::repeat;material.uv=affine_image_uv(scroll);
+        if(error==Error::none)error=backend_.draw(map_quad_,material,pose);
+    }
     material=screen_material();material.texture=map_foreground_;material.blend=Blend::alpha;
     material.uv={1,0,0,0,192.f/256,0};
     if(error==Error::none)error=backend_.draw(map_quad_,material,pose);
@@ -677,7 +846,7 @@ Error SceneRenderer::draw_frame(const SceneView& scene,Screen output,const std::
     if(lenient_&&scene.occurrences>skip_.size())return Error::capacity;
     if(bridge_active_&&bridge_.other_affine){
         if(!valid(*bridge_.other_affine))return Error::invalid_data;
-        error=initialize_map_surfaces();if(error!=Error::none)return error;
+        error=initialize_map_surfaces();if(error!=Error::none){map_failure("surfaces",error,512,512);return error;}
     }
     if(bridge_active_){error=initialize_bridge_surfaces();if(error!=Error::none)return error;}
     if(scene.lighting.state_count>LightingPalette::max_states)return Error::invalid_data;
@@ -697,7 +866,7 @@ Error SceneRenderer::draw_frame(const SceneView& scene,Screen output,const std::
     // must never transfer its partly drawn target to the LCD.
     // (An overlapped second image keeps the links; nothing transfers it but
     // submit_overlapped, and relinking outside a C3D frame waits for the GPU.)
-    if(!second_){C3D_RenderTargetSetOutput(nullptr,GFX_TOP,GFX_LEFT,0);
+    if(!second_){C3D_RenderTargetSetOutput(nullptr,GFX_TOP,GFX_RIGHT,0);C3D_RenderTargetSetOutput(nullptr,GFX_TOP,GFX_LEFT,0);
         C3D_RenderTargetSetOutput(nullptr,GFX_BOTTOM,GFX_LEFT,0);}
     target_->used=false;
     if(images)for(unsigned c=0;c<2&&error==Error::none;++c){const auto& p=(*images)[c];
@@ -719,69 +888,16 @@ Error SceneRenderer::draw_frame(const SceneView& scene,Screen output,const std::
         (unsigned long long)serial_,phase,describe(error),unsigned(scene.quad_vertices/4),
         unsigned(scene.skin_vertices),unsigned(scene.image_layers));};
     trace_frame_stage("prepared");
-    if(error==Error::none&&preload_count_){
-        // prepare() has protected every resource needed by this visible frame.
-        // Run on the GPU owner only; Old's sole core1 app slot remains audio's.
-        for(unsigned i=0;i<preload_count_;++i){
-            const auto request=preload_[i];const auto id=request.id;
-            if(request.kind==PreloadKind::canvas){
-                auto* slot=find_canvas(id);
-                if(slot&&slot->model.geometry_ready())continue;
-                if(!slot)for(auto& item:canvas_resident_)if(!item.binding){slot=&item;break;}
-                if(!slot){std::printf("Native preload skipped: canvas=%lu no free slot\n",(unsigned long)id);continue;}
-                const auto* binding=canvases_.find(id);const bool pinned=slot->pinned;slot->pinned=true;
-                const auto loaded=load(*slot,*binding);
-                if(loaded!=Error::none){slot->model.reset();slot->binding=nullptr;}
-                slot->pinned=pinned;
-                std::printf("Native preload: canvas=%lu serial=%llu status=%s\n",(unsigned long)id,(unsigned long long)serial_,describe(loaded));
-                continue;
-            }
-            if(request.kind==PreloadKind::image_bank){
-                auto* slot=find_images(id);
-                if(!slot)for(auto& item:image_resident_)if(!item.binding){slot=&item;break;}
-                if(!slot){std::printf("Native preload skipped: images=%lu no free slot\n",(unsigned long)id);continue;}
-                const auto* binding=images_.find(id);const bool resident=slot->binding!=nullptr;
-                const bool pinned=slot->pinned;slot->pinned=true;slot->required.fill(false);
-                bool missing=false;
-                for(unsigned n=0;n<binding->images;++n){slot->required[n]=true;missing|=!slot->images.image(n);}
-                const auto loaded=missing?load(*slot,*binding):Error::none;
-                // NativeImages stages additions; speculative failure cannot
-                // destroy textures already referenced by this visible frame.
-                if(loaded!=Error::none&&!resident){slot->images.reset();slot->binding=nullptr;}
-                slot->pinned=pinned;
-                std::printf("Native preload: images=%lu serial=%llu status=%s\n",(unsigned long)id,(unsigned long long)serial_,describe(loaded));
-                continue;
-            }
-            auto* slot=find(id);
-            if(request.kind==PreloadKind::model_images){
-                if(!slot)for(auto& item:resident_)if(!item.binding){slot=&item;break;}
-                if(!slot){std::printf("Native preload skipped: modelImages=%lu no free slot\n",(unsigned long)id);continue;}
-                const auto* binding=catalog_.find(id);const bool resident=slot->binding!=nullptr;
-                const bool pinned=slot->pinned,geometry=slot->required_geometry;
-                slot->pinned=true;slot->required_geometry=false;slot->required_images={};
-                bool missing=false;
-                for(unsigned n=0;n<binding->images;++n){slot->required_images[n/32]|=1u<<(n%32);missing|=!slot->model.image(n);}
-                const auto loaded=missing?load(*slot,*binding):Error::none;
-                if(loaded!=Error::none&&!resident){slot->model.reset();slot->binding=nullptr;}
-                slot->pinned=pinned;slot->required_geometry=geometry;
-                std::printf("Native preload: modelImages=%lu serial=%llu status=%s\n",(unsigned long)id,(unsigned long long)serial_,describe(loaded));
-                continue;
-            }
-            if(slot&&slot->model.geometry_ready())continue;
-            // A visible image-only bank must not be destructively promoted by
-            // speculation: failure would lose textures needed by this frame.
-            if(slot&&slot->pinned){std::printf("Native preload skipped: model=%lu visible image bank\n",(unsigned long)id);continue;}
-            if(!slot)for(auto& item:resident_)if(!item.binding){slot=&item;break;}
-            if(!slot){std::printf("Native preload skipped: model=%lu no free slot\n",(unsigned long)id);continue;}
-            const auto* binding=catalog_.find(id);slot->required_geometry=true;slot->pinned=true;
-            const auto loaded=load(*slot,*binding);
-            std::printf("Native preload: model=%lu serial=%llu status=%s\n",(unsigned long)id,(unsigned long long)serial_,describe(loaded));
-            if(loaded!=Error::none){slot->model.reset();slot->binding=nullptr;slot->pinned=false;}
-        }
-        preload_count_=0;
-    }
+    // prepare() has protected every resource needed by this visible frame.
+    // Run on the GPU owner only; Old's sole core1 app slot remains audio's.
+    if(error==Error::none&&preload_count_)run_preloads();
     mark();
+    // BUILD142: the dynamic stage by part (ranges, quads, skin), logged every
+    // 240 images with timings: the file selector spent 13.7 ms here per
+    // image on the Old 3DS at half clock for a 78 KB mesh.
+    const auto dynamic_start=svcGetSystemTick();
     if(error==Error::none&&batches_)dynamic_ranges_.prepare(scene);
+    const auto dynamic_ranges=svcGetSystemTick();
     if(error==Error::none&&scene.quad_vertices&&!second_){
         const auto required=scene.quad_vertices/4;
         if(required>quad_capacity_){
@@ -798,6 +914,11 @@ Error SceneRenderer::draw_frame(const SceneView& scene,Screen output,const std::
         if(error==Error::none)error=backend_.update_skin_stream(skin_stream_,scene.skin_vertex,scene.skin_vertices,batches_?dynamic_ranges_.skin():nullptr);
         if(error!=Error::none&&lenient_){error=Error::none;for(std::size_t i=0;i<scene.occurrences&&i<skip_.size();++i)if(scene.occurrence[i].kind==Occurrence::Kind::skin||scene.occurrence[i].kind==Occurrence::Kind::mesh)skip_[i]=true;}
     }
+    if(timings_){static std::uint64_t ranges=0,streams=0;static unsigned images=0;
+        const auto end=svcGetSystemTick();ranges+=dynamic_ranges-dynamic_start;streams+=end-dynamic_ranges;
+        if(++images>=240){std::printf("Native dynamic stage (ms/image over %u): ranges=%.2f streams=%.2f skinVertices=%u quadVertices=%u occurrences=%u\n",
+            images,double(ranges)*1000.0/SYSCLOCK_ARM11/images,double(streams)*1000.0/SYSCLOCK_ARM11/images,
+            unsigned(scene.skin_vertices),unsigned(scene.quad_vertices),unsigned(scene.occurrences));ranges=streams=0;images=0;}}
     trace_frame_stage("dynamic");
     mark();
     // Validate all occurrence ranges before any draw or framebuffer clear.
@@ -841,31 +962,48 @@ Error SceneRenderer::draw_frame(const SceneView& scene,Screen output,const std::
     trace_frame_stage("preflight");
     mark();const bool batch_frame=error==Error::none&&batches_&&prepare_batches(scene);mark();
     trace_frame_stage("planned");
-    const Citro3DBackend::Viewport area{0,0,240,screen_width(output)*scene_scale_};
-    if(error==Error::none)error=backend_.pass(target_,true,scene.clear.rgba,&area);
-    if(error==Error::none){
-        // Fog experiment (off unless the frame carries enabled fog registers).
-        const auto depth=fog_depth(scene.fog_projection);
-        if(fog_drawable(scene.fog,depth)){
-            if(!fog_table_valid_||!same(fog_source_,scene.fog)||fog_depth_.a!=depth.a||fog_depth_.b!=depth.b){
-                build_fog_lut(scene.fog,depth,fog_table_.data());fog_source_=scene.fog;fog_depth_=depth;fog_table_valid_=true;
+    const float requested=lenient_&&!second_?osGet3DSliderState():0.f;
+    const float slider=requested>0&&compositor_.prepare_right_eye()?requested:0.f;
+    for(unsigned eye=0;eye<(slider>0?2u:1u)&&error==Error::none;++eye){
+        const Citro3DBackend::Viewport area{0,0,240,screen_width(output)*scene_scale_};
+        if(!eye||output==Screen::top){
+            backend_.stereo_eye(output==Screen::top?(eye?slider:-slider):0.f);
+            if(error==Error::none)error=backend_.pass(target_,true,scene.clear.rgba,&area);
+            if(error==Error::none){
+                // Fog experiment (off unless the frame carries enabled fog registers).
+                const auto depth=fog_depth(scene.fog_projection);
+                if(fog_drawable(scene.fog,depth)){
+                    if(!fog_table_valid_||!same(fog_source_,scene.fog)||fog_depth_.a!=depth.a||fog_depth_.b!=depth.b){
+                        build_fog_lut(scene.fog,depth,fog_table_.data());fog_source_=scene.fog;fog_depth_=depth;fog_table_valid_=true;
+                    }
+                    backend_.fog(fog_table_.data(),fog_colour(scene.fog));
+                }
             }
-            backend_.fog(fog_table_.data(),fog_colour(scene.fog));
+            // BUILD140: polygon-ID-1 materials mark stencil bit 7 in images that
+            // draw shadow volumes (a second image reuses the uploaded volumes).
+            backend_.mark_shadow_owners(shadow_vertex_count_!=0);
+            if(error==Error::none)for(std::size_t i=0,n=batch_frame?batch_commands_:scene.occurrences;i<n;++i){
+                const auto occurrence=batch_frame?batch_command_[i].occurrence:i;
+                if(lenient_&&occurrence<skip_.size()&&skip_[occurrence]){++skipped_total_;continue;}
+                error=batch_frame&&batch_command_[i].batch?backend_.draw_batch(batch_plan_,batch_command_[i].span):
+                    draw_occurrence(scene,occurrence,batch_frame?batch_command_[i].part:-1);
+                if(error!=Error::none){if(lenient_){error=Error::none;++skipped_total_;continue;}break;}
+            }
+            backend_.mark_shadow_owners(false);
+            if(error==Error::none)error=draw_shadows(scene);
         }
+        backend_.stereo_eye(0.f);
+        trace_frame_stage("geometry");
+        if(!eye&&error==Error::none&&bridge_active_&&bridge_.other_affine)error=draw_map(*bridge_.other_affine);
+        if(!eye&&error==Error::none&&bridge_active_)error=expand_bridge_planes();
+        if(second_)compositor_.present_only(output==Screen::top?0:1);
+        compositor_.right_eye(eye!=0);
+        if(!eye)mark();
+        if(error==Error::none)error=bridge_active_?compose_bridge(scene,output,order):compose(scene,output,order);
     }
-    if(error==Error::none)for(std::size_t i=0,n=batch_frame?batch_commands_:scene.occurrences;i<n;++i){
-        const auto occurrence=batch_frame?batch_command_[i].occurrence:i;
-        if(lenient_&&occurrence<skip_.size()&&skip_[occurrence]){++skipped_total_;continue;}
-        error=batch_frame&&batch_command_[i].batch?backend_.draw_batch(batch_plan_,batch_command_[i].span):
-            draw_occurrence(scene,occurrence,batch_frame?batch_command_[i].part:-1);
-        if(error!=Error::none){if(lenient_){error=Error::none;++skipped_total_;continue;}break;}
-    }
-    if(error==Error::none)error=draw_shadows(scene);
-    trace_frame_stage("geometry");
-    if(error==Error::none&&bridge_active_&&bridge_.other_affine)error=draw_map(*bridge_.other_affine);
-    if(error==Error::none&&bridge_active_)error=expand_bridge_planes();
-    if(second_)compositor_.present_only(output==Screen::top?0:1);
-    mark();if(error==Error::none)error=bridge_active_?compose_bridge(scene,output,order):compose(scene,output,order);mark();
+    compositor_.right_eye(false);
+    if(!second_&&gfxIs3D()!=(slider>0&&error==Error::none))gfxSet3D(slider>0&&error==Error::none);
+    mark();
     compositor_.present_only(-1);
     trace_frame_stage("composed");
     const auto ended=second_?backend_.end_overlapped():backend_.end();if(error==Error::none)error=ended;
@@ -987,7 +1125,9 @@ Error SceneRenderer::shutdown() noexcept {
     for(auto& texture:bridge_base_)if(texture){error=backend_.destroy(texture);if(error!=Error::none){backend_.end();return error;}texture={};}
     for(unsigned k=0;k<4;++k)if(bridge_path_[k]!=BridgePath::gpu&&bridge_texture_[k]){
         error=backend_.destroy(bridge_texture_[k]);if(error!=Error::none){backend_.end();return error;}bridge_texture_[k]={};}
-    for(auto* texture:{&map_raster_,&map_foreground_})if(*texture){error=backend_.destroy(*texture);if(error!=Error::none){backend_.end();return error;}*texture={};}
+    for(auto* texture:{&map_raster_,&map_foreground_,&map_behind_,&map_layer_[0],&map_layer_[1],&map_layer_[2]})
+        if(*texture){error=backend_.destroy(*texture);if(error!=Error::none){backend_.end();return error;}*texture={};}
+    map_layer_identity_={};map_layer_key_={};
     if(map_quad_){error=backend_.destroy(map_quad_);if(error!=Error::none){backend_.end();return error;}map_quad_={};}
     quad_stream_={};quad_capacity_=0;
     error=backend_.end();if(error!=Error::none)return error;
@@ -1019,6 +1159,7 @@ Error SceneRenderer::capture_geometry(Screen screen,std::uint32_t* argb,std::siz
     if(!ready_||!completed_target_||!backend_.between_frames())return Error::invalid_phase;
     if(!argb||pixels!=256*192)return Error::invalid_data;
     const unsigned width=256,height=512*scene_scale_,bytes=width*height*4;
+    if(sm64ds_gpu_unusable&&sm64ds_gpu_unusable())return Error::gpu_failure; // BUILD137 (hang_watchdog.hpp)
     auto* scratch=static_cast<std::uint32_t*>(linearMemAlign(bytes,128));
     if(!scratch)return Error::out_of_memory;
     auto error=finish();

@@ -2,6 +2,7 @@
 // Local diagnostic capture, enabled by the saved Developer setting.
 // No process RAM is changed or restored. A dump freezes the game at its frame
 // hook after the presentation worker drains; GPU/OS/DSP state is not atomic.
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -18,9 +19,19 @@
 #include "hitch_capture.hpp"
 #include "dump_folder.hpp"
 #include "sd_writer.hpp"
+#include "graphics_report.hpp"
 #include <atomic>
 #include <ctime>
 #include <malloc.h>
+// LZ4 1.9.4 (third_party/lz4, BSD-2-Clause): the preparers copy lz4.h/lz4.c
+// next to this header and compile lz4.c into the game. Isolated include
+// trees without it still compile; their packed dumps store raw blocks (lz4=0).
+#if __has_include("lz4.h")
+#include "lz4.h"
+#define SM64DS_DUMP_LZ4 1
+#else
+#define SM64DS_DUMP_LZ4 0
+#endif
 #endif
 
 namespace native_diagnostics {
@@ -36,6 +47,18 @@ struct Header {
 struct Region {uint32_t address,size,perm,state,payload_bytes,reason;};
 static_assert(sizeof(Header)==64 && sizeof(Region)==24,"Diagnostic disk format");
 constexpr uint32_t region_device_payload=4;
+// Packed memory.vm (SM64VMZ1, BUILD140): PackHeader, then the SM64VM1 Header
+// and Region records exactly as SM64VM1 writes them, except that each
+// region's payload is a run of blocks of at most block_bytes of address
+// space: a PackBlock followed by `stored` bytes. tools/vm_packed.py expands
+// it back to the SM64VM1 bytes. Kinds: 0 all zero (stored 0), 1 raw, 2 one
+// LZ4 block (stored < logical), 3 the dump's own workspace (stored 0; read
+// back as zeros).
+constexpr uint32_t pack_block_bytes=512*1024;
+struct PackHeader {char magic[8]={'S','M','6','4','V','M','Z','1'};uint32_t version=1,block_bytes=pack_block_bytes;};
+struct PackBlock {uint32_t address,logical,stored,kind;};
+static_assert(sizeof(PackHeader)==16 && sizeof(PackBlock)==16,"Packed disk format");
+enum : uint32_t {pack_zero=0,pack_raw=1,pack_lz4=2,pack_excluded=3};
 // Mapped memory without read side effects: both VRAM banks and the DSP
 // shared-memory windows. Everything else in MEMSTATE_IO stays excluded.
 inline bool plain_device_memory(uint32_t address,uint32_t size){
@@ -89,6 +112,7 @@ inline void configure_verbose(){
     verbose_flag.store(on,std::memory_order_relaxed);
 }
 inline bool requested=false;          // full dump: screens, RAM, VRAM
+inline bool quick_requested=false;
 inline bool partial_requested=false;  // screens, VRAM, registers; no RAM
 inline bool delete_requested=false;
 inline char last_capture_stem[dump_folder::max_path]{}; // folder of the last dump
@@ -138,8 +162,73 @@ struct Trace {
 };
 inline Trace trace;
 alignas(32) inline std::array<uint32_t,transfer_bytes/4> transfer_staging{};
+inline graphics_report::Writer report_writer(){return {transfer_staging.data(),transfer_bytes};}
 inline SdWriter make_writer(){return SdWriter(transfer_staging.data(),transfer_bytes);}
 inline bool join(char* out,size_t cap,const char* dir,const char* name){return std::snprintf(out,cap,"%s/%s",dir,name)<int(cap);}
+// How the last memory.vm was written (log line and info.txt "Packing:").
+struct PackStats {
+    uint64_t file_bytes=0,zero_bytes=0,stored_bytes=0,copy_ticks=0,compress_ticks=0,fs_ticks=0;
+    unsigned blocks[4]{},writes=0;
+    bool written=false,packed=false,lz4=false;
+    SdWriter::Buffer buffer=SdWriter::Buffer::none;
+};
+inline PackStats last_pack;
+// 2 MiB from the 16 MiB linear heap, held only while memory.vm is written:
+// in levels the libc heap is full (appFree=0) while linearFree at the drain
+// was 6.7 MB (title) and 10.3-11.4 MB (levels) in BUILD139.
+struct DumpWorkspace {
+    static constexpr size_t block_bytes=pack_block_bytes,state_bytes=32*1024,total=2*1024*1024+64*1024,
+                            out_bytes=total-block_bytes-state_bytes; // space for an aligned MiB plus a full compressed record
+    uint8_t* base=nullptr;bool compress=false;
+    uint8_t* stage()const{return base;}
+    void* lz4_state()const{return base+block_bytes;}
+    uint8_t* out()const{return base+block_bytes+state_bytes;}
+    uint64_t begin()const{return reinterpret_cast<uintptr_t>(base);}
+    uint64_t end()const{return base?begin()+total:0;}
+    bool acquire(){
+        if(base)return true;
+        if(!(base=static_cast<uint8_t*>(linearMemAlign(total,0x1000))))return false;
+#if SM64DS_DUMP_LZ4
+        compress=size_t(LZ4_sizeofState())<=state_bytes;
+#else
+        compress=false;
+#endif
+        return true;
+    }
+    void release(){if(base)linearFree(base);base=nullptr;compress=false;}
+};
+#if SM64DS_DUMP_LZ4
+static_assert(DumpWorkspace::out_bytes>=sizeof(PackBlock)+LZ4_COMPRESSBOUND(DumpWorkspace::block_bytes),"One worst-case LZ4 block fits");
+#endif
+static_assert(DumpWorkspace::out_bytes>=sizeof(PackBlock)+DumpWorkspace::block_bytes,"One raw block fits");
+inline DumpWorkspace workspace;
+// read_capture_words (VRAM-safe word loads) that also reports whether any
+// word was non-zero, so the zero test needs no second pass over the stage.
+inline bool read_capture_words_any(uintptr_t address,void* destination,size_t bytes,bool& nonzero){
+    if((address&3u)||(reinterpret_cast<uintptr_t>(destination)&3u)||(bytes&3u))return false;
+    auto* out=static_cast<uint32_t*>(destination);
+    const auto* in=reinterpret_cast<const volatile uint32_t*>(address);
+    uint32_t any=0;
+    for(size_t i=0;i<bytes/4;++i){const uint32_t v=in[i];out[i]=v;any|=v;}
+    nonzero=any!=0;return true;
+}
+inline double ticks_seconds(uint64_t ticks){return double(ticks)/SYSCLOCK_ARM11;}
+inline void describe_pack(char* out,size_t cap,const PackStats& s){
+    if(!s.written){std::snprintf(out,cap,"not written");return;}
+    if(!s.packed){
+        std::snprintf(out,cap,"raw SM64VM1 (no %u KiB linear workspace), %llu KiB, sd %.2f s, %u writes, buffer %s",
+            unsigned(DumpWorkspace::total/1024),(unsigned long long)(s.file_bytes/1024),ticks_seconds(s.fs_ticks),s.writes,SdWriter::buffer_name(s.buffer));
+        return;
+    }
+    std::snprintf(out,cap,"SM64VMZ1 lz4=%u, %llu KiB on SD, stored %llu KiB, zero %llu KiB, blocks zero/raw/lz4/excluded %u/%u/%u/%u, "
+        "copy %.2f s, compress %.2f s, sd %.2f s, %u writes",unsigned(s.lz4),(unsigned long long)(s.file_bytes/1024),
+        (unsigned long long)(s.stored_bytes/1024),(unsigned long long)(s.zero_bytes/1024),s.blocks[0],s.blocks[1],s.blocks[2],s.blocks[3],
+        ticks_seconds(s.copy_ticks),ticks_seconds(s.compress_ticks),ticks_seconds(s.fs_ticks),s.writes);
+}
+inline void log_pack(const PackStats& s){
+    char text[320];describe_pack(text,sizeof text,s);
+    std::printf("Native diagnostic pack: %s linearFree=%uKiB\n",text,unsigned(linearSpaceFree()/1024));
+}
 inline bool readable_span(uint32_t address,uint32_t size){
     MemInfo memory{};PageInfo page{};
     if(!address||!size||R_FAILED(svcQueryMemory(&memory,&page,address)))return false;
@@ -171,7 +260,7 @@ inline void scanout_bgr(const uint8_t* fb,const LcdRecord& r,unsigned x,unsigned
     out[0]=uint8_t(blue);out[1]=uint8_t(green);out[2]=uint8_t(red);
 }
 inline bool write_bmp(const char* path,const uint8_t* fb,const LcdRecord& r){
-    auto w=make_writer();
+    auto w=report_writer();
     const unsigned row_bytes=dump_folder::bmp_row_bytes(r.columns);
     if(!w.open(path,54+uint64_t(row_bytes)*r.rows))return false;
     uint8_t header[54];dump_folder::bmp_header(header,r.columns,r.rows);
@@ -213,23 +302,27 @@ inline bool capture_screens(const char* dir,unsigned scene,unsigned epoch){
         r.valid=1;
     }
     // Copy every scanout first (word loads: VRAM-safe), then write files.
-    uint8_t* pixels[3]{};
+    // BUILD139 levels: the libc heap was full and these copies failed
+    // (lcd.bin header only, no BMPs); the linear heap had room.
+    uint8_t* pixels[3]{};bool linear[3]{};
     for(unsigned i=0;i<3;++i)if(records[i].valid){
         pixels[i]=static_cast<uint8_t*>(std::malloc(records[i].payload_bytes));
-        if(!pixels[i]||!read_capture_words(records[i].virtual_address,pixels[i],records[i].payload_bytes)){records[i].status=4;records[i].valid=0;}
+        if(!pixels[i])linear[i]=(pixels[i]=static_cast<uint8_t*>(linearAlloc(records[i].payload_bytes)))!=nullptr;
+        // An invalid record carries no payload (inspect_integrated_vm.LCD).
+        if(!pixels[i]||!read_capture_words(records[i].virtual_address,pixels[i],records[i].payload_bytes)){records[i].status=4;records[i].valid=0;records[i].payload_bytes=0;}
     }
     char path[dump_folder::max_path+16];
-    auto lcd=make_writer();
+    auto lcd=report_writer();
     bool written=join(path,sizeof path,dir,"lcd.bin")&&lcd.open(path)&&lcd.write(&header,sizeof header)&&
         lcd.write(records,sizeof records)&&lcd.write(registers.data(),registers.size()*4);
     for(unsigned i=0;i<3;++i)if(written&&records[i].valid)written=lcd.write(pixels[i],records[i].payload_bytes);
     written=lcd.close()&&written;
     // The right eye is only meaningful while the 3D effect is shown.
-    const bool stereo=(records[0].format&0x20)!=0;
+    const bool stereo=gfxIs3D()&&records[0].physical!=records[1].physical;
     constexpr const char* names[3]={"top-screen.bmp","top-screen-right.bmp","bottom-screen.bmp"};
     for(unsigned i=0;i<3;++i){
         if(records[i].valid&&(i!=1||stereo)&&join(path,sizeof path,dir,names[i]))written=write_bmp(path,pixels[i],records[i])&&written;
-        std::free(pixels[i]);
+        if(linear[i])linearFree(pixels[i]);else std::free(pixels[i]);
     }
     std::printf("Native diagnostic screens dir=%s ok=%u top=%u/%u bottom=%u formats=%x/%x\n",dir,unsigned(ok&&written),
         records[0].valid,records[1].valid,records[2].valid,records[0].format,records[2].format);
@@ -247,34 +340,46 @@ inline bool write_range(const char* path,uint32_t address,uint32_t bytes,unsigne
     }
     return w.close();
 }
+// The mapping at `address`, clipped to scan_end, as one Region record:
+// payload (reason 0, or 4 for plain device memory) or skipped (1 unreadable,
+// 2 free/reserved/IO/excluded device window, 3 over budget, which also
+// clears ok). False: the query failed and the scan must stop.
+inline bool classify_region(const Header& header,uint64_t address,bool include_devices,uint64_t& total,
+                            Region& region,uint64_t& limit,bool& ok){
+    MemInfo memory{};PageInfo page{};
+    const Result result=svcQueryMemory(&memory,&page,uint32_t(address));
+    const uint64_t end=uint64_t(memory.base_addr)+memory.size;
+    if(R_FAILED(result)||memory.base_addr>address||end<=address)return false;
+    limit=end<header.scan_end?end:header.scan_end;
+    region=Region{uint32_t(address),uint32_t(limit-address),memory.perm,memory.state,0,0};
+    const unsigned state=memory.state&0xff;
+    // CIA maps VRAM as static read-only memory, not necessarily MEMSTATE_IO.
+    // Exclude physical windows by address too, including a partial overlap.
+    const bool device_window=(address<0x1F600000u&&limit>0x1F000000u)||
+                             (address<0x1FF80000u&&limit>0x1FF00000u);
+    if(!include_devices&&device_window)region.reason=2;
+    else if(!(memory.perm&MEMPERM_READ))region.reason=1;
+    else if(state==MEMSTATE_IO&&include_devices&&plain_device_memory(region.address,region.size)){
+        if(total+region.size>uint64_t(header.scan_end)){region.reason=3;ok=false;}
+        else {region.reason=region_device_payload;region.payload_bytes=region.size;total+=region.size;}
+    }
+    else if(state==MEMSTATE_FREE||state==MEMSTATE_RESERVED||state==MEMSTATE_IO)region.reason=2;
+    else if(total+region.size>uint64_t(header.scan_end)){region.reason=3;ok=false;}
+    else {region.payload_bytes=region.size;total+=region.size;}
+    return true;
+}
 // Full process address space (SM64VM1 v2), plain device memory included.
+// Raw format: the fallback of write_memory_packed.
 inline bool write_memory(const char* path,Header& header,uint64_t& total,bool include_devices=true){
     header.non_atomic_devices=include_devices?1u:0u;
+    PackStats s;s.written=true;
     auto w=make_writer();
-    if(!w.open(path))return false;
+    if(!w.open(path)){last_pack=s;return false;}
     bool ok=w.write(&header,sizeof header);
     uint64_t address=0;total=0;
     for(unsigned blocks=0;ok&&address<header.scan_end&&blocks<512;++blocks){
-        MemInfo memory{};PageInfo page{};
-        const Result result=svcQueryMemory(&memory,&page,uint32_t(address));
-        const uint64_t end=uint64_t(memory.base_addr)+memory.size;
-        if(R_FAILED(result)||memory.base_addr>address||end<=address){ok=false;break;}
-        const uint64_t limit=end<header.scan_end?end:header.scan_end;
-        Region region{uint32_t(address),uint32_t(limit-address),memory.perm,memory.state,0,0};
-        const unsigned state=memory.state&0xff;
-        // CIA maps VRAM as static read-only memory, not necessarily MEMSTATE_IO.
-        // Exclude physical windows by address too, including a partial overlap.
-        const bool device_window=(address<0x1F600000u&&limit>0x1F000000u)||
-                                 (address<0x1FF80000u&&limit>0x1FF00000u);
-        if(!include_devices&&device_window)region.reason=2;
-        else if(!(memory.perm&MEMPERM_READ))region.reason=1;
-        else if(state==MEMSTATE_IO&&include_devices&&plain_device_memory(region.address,region.size)){
-            if(total+region.size>uint64_t(header.scan_end)){region.reason=3;ok=false;}
-            else {region.reason=region_device_payload;region.payload_bytes=region.size;total+=region.size;}
-        }
-        else if(state==MEMSTATE_FREE||state==MEMSTATE_RESERVED||state==MEMSTATE_IO)region.reason=2;
-        else if(total+region.size>uint64_t(header.scan_end)){region.reason=3;ok=false;}
-        else {region.payload_bytes=region.size;total+=region.size;}
+        Region region{};uint64_t limit=0;
+        if(!classify_region(header,address,include_devices,total,region,limit,ok)){ok=false;break;}
         if(!w.write(&region,sizeof region)){ok=false;break;}
         ++header.regions;
         for(uint32_t done=0;ok&&done<region.payload_bytes;){
@@ -288,19 +393,95 @@ inline bool write_memory(const char* path,Header& header,uint64_t& total,bool in
     }
     header.end_tick=svcGetSystemTick();header.complete=ok&&address==header.scan_end;
     ok=w.write_at(0,&header,sizeof header)&&ok;
-    return w.close()&&ok&&header.complete;
+    s.file_bytes=w.size();s.buffer=w.buffer_kind();
+    const bool closed=w.close();
+    s.fs_ticks=w.fs_ticks();s.writes=w.writes();last_pack=s;
+    return closed&&ok&&header.complete;
 }
-inline void write_info(const char* dir,bool full,unsigned scene,unsigned epoch,uint64_t begin,bool screens,bool trace_ok,bool memory_ok,uint64_t memory_bytes){
+// Same scan and Region records as write_memory, written as SM64VMZ1 from a
+// 2 MiB linear workspace held only for this file: all-zero blocks cost 16
+// bytes, the rest is LZ4 (raw when that does not shrink a block). The
+// workspace itself is recorded as excluded, never read. Without the
+// workspace this writes plain SM64VM1 through write_memory.
+// BUILD139 model (Old 3DS): about 9 s and 13 MB per level dump instead of
+// 37-208 s and 90.7 MB; the log line below gives the measured split.
+inline bool write_memory_packed(const char* path,Header& header,uint64_t& total,bool include_devices=true){
+    auto& ws=workspace;
+    if(!ws.acquire()){
+        const bool ok=write_memory(path,header,total,include_devices);
+        log_pack(last_pack);return ok;
+    }
+    struct Release {~Release(){workspace.release();}} release; // after the writer closes
+    PackStats s;s.written=true;s.packed=true;s.lz4=ws.compress;
+    header.non_atomic_devices=include_devices?1u:0u;
+    const PackHeader pack{};
+    SdWriter w(transfer_staging.data(),transfer_bytes);
+    bool ok=w.open_with(path,ws.out(),DumpWorkspace::out_bytes)&&w.write(&pack,sizeof pack)&&w.write(&header,sizeof header);
+    uint64_t address=0;total=0;
+    for(unsigned blocks=0;ok&&address<header.scan_end&&blocks<512;++blocks){
+        Region region{};uint64_t limit=0;
+        if(!classify_region(header,address,include_devices,total,region,limit,ok)){ok=false;break;}
+        if(!w.write(&region,sizeof region)){ok=false;break;}
+        ++header.regions;
+        for(uint32_t done=0;ok&&done<region.payload_bytes;){
+            const uint32_t at=region.address+done;
+            PackBlock b{at,std::min<uint32_t>(region.payload_bytes-done,uint32_t(DumpWorkspace::block_bytes)),0,pack_zero};
+            // Split blocks at the workspace edges (page aligned).
+            if(at>=ws.begin()&&at<ws.end()){b.logical=uint32_t(std::min<uint64_t>(b.logical,ws.end()-at));b.kind=pack_excluded;}
+            else if(at<ws.begin()&&at+uint64_t(b.logical)>ws.begin())b.logical=uint32_t(ws.begin()-at);
+            if(b.kind==pack_zero){
+                bool nonzero=false;
+                uint64_t t=svcGetSystemTick();
+                ok=read_capture_words_any(at,ws.stage(),b.logical,nonzero);
+                s.copy_ticks+=svcGetSystemTick()-t;
+                if(ok&&nonzero){
+                    size_t bound=b.logical;
+#if SM64DS_DUMP_LZ4
+                    if(ws.compress)bound=size_t(LZ4_compressBound(int(b.logical)));
+#endif
+                    uint8_t* dst=w.reserve_contiguous(sizeof b+bound);size_t stored=0;
+#if SM64DS_DUMP_LZ4
+                    if(dst&&ws.compress){
+                        t=svcGetSystemTick();
+                        const int n=LZ4_compress_fast_extState(ws.lz4_state(),reinterpret_cast<const char*>(ws.stage()),
+                            reinterpret_cast<char*>(dst+sizeof b),int(b.logical),int(bound),1);
+                        s.compress_ticks+=svcGetSystemTick()-t;
+                        if(n>0&&uint32_t(n)<b.logical)stored=size_t(n);
+                    }
+#endif
+                    b.kind=stored?pack_lz4:pack_raw;
+                    if(dst&&!stored){std::memcpy(dst+sizeof b,ws.stage(),b.logical);stored=b.logical;}
+                    b.stored=uint32_t(stored);
+                    if(dst){std::memcpy(dst,&b,sizeof b);ok=w.commit(sizeof b+stored);s.stored_bytes+=stored;}
+                    else ok=false;
+                }else if(ok)s.zero_bytes+=b.logical;
+            }
+            if(ok&&(b.kind==pack_zero||b.kind==pack_excluded))ok=w.write(&b,sizeof b);
+            if(ok)++s.blocks[b.kind];
+            done+=b.logical;
+            // Address-space progress; the last ten percent is file finalization.
+            dump_progress(unsigned((address+done)*90/header.scan_end));
+        }
+        address=limit;
+    }
+    header.end_tick=svcGetSystemTick();header.complete=ok&&address==header.scan_end;
+    ok=w.write_at(sizeof pack,&header,sizeof header)&&ok;
+    s.file_bytes=w.size();s.buffer=w.buffer_kind();
+    const bool closed=w.close();
+    s.fs_ticks=w.fs_ticks();s.writes=w.writes();last_pack=s;log_pack(s);
+    return closed&&ok&&header.complete;
+}
+inline void write_info(const char* dir,bool full,bool quick,unsigned scene,unsigned epoch,uint64_t begin,bool screens,bool trace_ok,bool memory_ok,uint64_t memory_bytes){
     char path[dump_folder::max_path+16];
     if(!join(path,sizeof path,dir,"info.txt"))return;
-    FILE* f=std::fopen(path,"w");if(!f)return;
+    FILE* f=graphics_report::open_member(path,"w");if(!f)return;
     const auto& live=enhance::live();const auto s=enhance::snapshot();
     const struct mallinfo heap=mallinfo();
     const time_t now=std::time(nullptr);char when[32]="unknown";
     if(const struct tm* t=std::localtime(&now))std::strftime(when,sizeof when,"%Y-%m-%d %H:%M:%S",t);
     const char* slash=std::strrchr(dir,'/');
     std::fprintf(f,"Super Mario 64 DS 3DS - diagnostic dump\n");
-    std::fprintf(f,"Dump: %s (%s)\nTime: %s\n",slash?slash+1:dir,full?"full: screens, RAM, VRAM":"partial: screens, VRAM, registers; no RAM",when);
+    std::fprintf(f,"Dump: %s (%s)\nTime: %s\n",slash?slash+1:dir,full?"full: screens, RAM, VRAM":quick?"graphics: screens, trace and renderer":"partial: screens, VRAM, registers; no RAM",when);
     std::fprintf(f,"Console: %s 3DS, kernel %u.%u, firm %u.%u, app memory type %u, app region %u MiB\n",
         live.new_model.load(std::memory_order_relaxed)?"New":"Old",unsigned(OS_KernelConfig->kernel_ver>>24),unsigned((OS_KernelConfig->kernel_ver>>16)&255),
         unsigned(OS_KernelConfig->firm_ver>>24),unsigned((OS_KernelConfig->firm_ver>>16)&255),unsigned(OS_KernelConfig->app_memtype),unsigned(OS_KernelConfig->memregion_sz[0]>>20));
@@ -315,31 +496,35 @@ inline void write_info(const char* dir,bool full,unsigned scene,unsigned epoch,u
     std::fprintf(f,"Memory: heap used %u KiB, heap arena %u KiB, linear free %u KiB, VRAM free %u KiB\n",unsigned(heap.uordblks/1024),
         unsigned(heap.arena/1024),unsigned(linearSpaceFree()/1024),unsigned(vramSpaceFree()/1024));
     std::fprintf(f,"Files: lcd.bin + screen BMPs %s, trace.bin %s, %s %s (%llu bytes)\n",screens?"ok":"FAILED",trace_ok?"ok":"FAILED",
-        full?"memory.vm":"vram.bin + dsp.bin",memory_ok?"ok":"FAILED",(unsigned long long)memory_bytes);
+        full?"memory.vm":quick?"memory skipped":"vram.bin + dsp.bin",memory_ok?"ok":"FAILED",(unsigned long long)memory_bytes);
+    if(full){char packing[320];describe_pack(packing,sizeof packing,last_pack);std::fprintf(f,"Packing: %s\n",packing);}
     std::fprintf(f,"Duration: %.0f ms\n",double(svcGetSystemTick()-begin)*1000.0/SYSCLOCK_ARM11);
     std::fclose(f);
 }
 // One dump into sdmc:/3ds/sm64ds/dumps/NNN-dump-YYYYMMDD-HHMMSS. Full dumps
 // need Developer > Full RAM dumps; partial dumps never read process RAM.
 inline bool capture(bool full,unsigned scene,unsigned epoch,const Anchor* anchors,size_t anchor_count){
+    const bool quick=quick_requested&&!full;quick_requested=false;
     if(full&&!enabled())return false;
     const uint64_t begin=svcGetSystemTick();
     char dir[dump_folder::max_path];
-    if(!dump_folder::create(dir,sizeof dir)){
+    if(!dump_folder::create(dir,sizeof dir,dump_folder::root_directory,quick)){
         std::printf("Native diagnostic failed: cannot create a folder in %s\n",dump_folder::root_directory);
         dump_progress_full=full;dump_progress(0,true,true);return false;
     }
     std::snprintf(last_capture_stem,sizeof last_capture_stem,"%s",dir);
     // The physical screens first: the progress screen repaints the lower LCD.
+    dump_progress_quick=quick;
+    if(quick&&!graphics_report::begin(dir))return false;
     const bool screens_ok=capture_screens(dir,scene,epoch);
     dump_progress_full=full;dump_progress(0,true);
     char path[dump_folder::max_path+16];
-    auto trace_writer=make_writer();
+    auto trace_writer=report_writer();
     const bool trace_ok=join(path,sizeof path,dir,"trace.bin")&&trace.save(trace_writer,path);
     bool metadata_ok=false;
-    if(join(path,sizeof path,dir,"anchors.json"))if(FILE* metadata=std::fopen(path,"w")){
+    if(join(path,sizeof path,dir,"anchors.json"))if(FILE* metadata=graphics_report::open_member(path,"w")){
         std::fprintf(metadata,"{\"scene\":%u,\"epoch\":%u,\"kind\":\"%s\",\"word_bytes\":4,\"GPU_OS_DSP_atomic\":false,\"worker_drained\":true,\"physical_lcd\":%s,\"anchors\":{",
-            scene,epoch,full?"full":"partial",screens_ok?"true":"false");
+            scene,epoch,full?"full":quick?"graphics":"partial",screens_ok?"true":"false");
         for(size_t i=0;i<anchor_count;++i)std::fprintf(metadata,"%s\"%s\":%u",i?",":"",anchors[i].name,unsigned(uintptr_t(anchors[i].address)));
         const auto& live=enhance::live();
         std::fprintf(metadata,"},\"console\":{\"new_model\":%s,\"fps_lock\":%u,\"kernel_version\":%u,\"firm_version\":%u,\"app_memtype\":%u,\"app_memregion_bytes\":%u}",
@@ -349,21 +534,24 @@ inline bool capture(bool full,unsigned scene,unsigned epoch,const Anchor* anchor
     }
     bool memory_ok=false;uint64_t memory_bytes=0;Header header;
     if(full){
-        header.scene=scene;header.epoch=epoch;header.begin_tick=begin;
-        memory_ok=join(path,sizeof path,dir,"memory.vm")&&write_memory(path,header,memory_bytes);
+        header.scene=scene;header.epoch=epoch;header.begin_tick=begin;last_pack={};
+        // SM64VMZ1; its 2 MiB workspace is released before info.txt is written.
+        memory_ok=join(path,sizeof path,dir,"memory.vm")&&write_memory_packed(path,header,memory_bytes);
+    }else if(quick){
+        memory_ok=true;
     }else{
         memory_ok=join(path,sizeof path,dir,"vram.bin")&&write_range(path,OS_VRAM_VADDR,OS_VRAM_SIZE,0,80);
         memory_bytes=memory_ok?OS_VRAM_SIZE:0;
         if(memory_ok&&join(path,sizeof path,dir,"dsp.bin")&&write_range(path,0x1FF50000,0x8000,80,85)&&
            join(path,sizeof path,dir,"dsp-2.bin")&&write_range(path,0x1FF70000,0x8000,85,90))memory_bytes+=0x10000;
     }
-    write_info(dir,full,scene,epoch,begin,screens_ok,trace_ok,memory_ok,memory_bytes);
-    const bool ok=memory_ok&&trace_ok&&metadata_ok;
+    write_info(dir,full,quick,scene,epoch,begin,screens_ok,trace_ok,memory_ok,memory_bytes);
+    const bool ok=memory_ok&&trace_ok&&metadata_ok&&(!quick||screens_ok);
     dump_progress(90,true,!ok);
     trace.clear(); // The next trace starts after capture I/O, not across it.
-    std::printf("Native diagnostic path=%s/%s complete=%u regions=%u bytes=%llu elapsedMs=%.3f trace=%u anchors=%u lcd=%u kind=%s\n",dir,full?"memory.vm":"vram.bin",
+    std::printf("Native diagnostic path=%s/%s complete=%u regions=%u bytes=%llu elapsedMs=%.3f trace=%u anchors=%u lcd=%u kind=%s\n",dir,full?"memory.vm":quick?"screens":"vram.bin",
         unsigned(ok),unsigned(header.regions),(unsigned long long)memory_bytes,
-        double(svcGetSystemTick()-begin)*1000.0/SYSCLOCK_ARM11,unsigned(trace_ok),unsigned(metadata_ok),unsigned(screens_ok),full?"full":"partial");
+        double(svcGetSystemTick()-begin)*1000.0/SYSCLOCK_ARM11,unsigned(trace_ok),unsigned(metadata_ok),unsigned(screens_ok),full?"full":quick?"graphics":"partial");
     return ok;
 }
 #endif

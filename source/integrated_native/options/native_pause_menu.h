@@ -38,7 +38,7 @@ public:
  const char* label(unsigned row)const;void value(unsigned row,char*,unsigned)const;
  uint32_t take_requests(){uint32_t r=requests_;requests_=0;return r;}
 private:
- void activate(int);void back();void finish(bool);
+ void activate(int);void back();void finish(bool);void return_to_options();
  // Returns whether the touch belongs to the volume control; sets changed.
  bool update_volume_touch(const Input&,bool& changed);
  bool update_confirm(const Input&);

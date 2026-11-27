@@ -35,6 +35,21 @@ inline bool numbered(const char* name, uint32_t& number) {
     return true;
 }
 
+// Flat reports and their incomplete writes share the sequence with full dumps.
+inline bool flat_report(const char* name,uint32_t& number){
+    const char* suffix=std::strchr(name,'.');
+    if(!suffix||suffix-name>=64)return false;
+    const char* endings[]={".top-screen.bmp",".bottom-screen.bmp",".info.txt",".graphics.zip"};
+    for(const char* end:endings){
+        const auto n=std::strlen(end);
+        if(std::strncmp(suffix,end,n)||(suffix[n]&&std::strcmp(suffix+n,".part")))continue;
+        char stem[64]{};
+        std::memcpy(stem,name,suffix-name);
+        return numbered(stem,number);
+    }
+    return false;
+}
+
 inline bool valid_stamp(const char* stamp) {
     if (!stamp || std::strlen(stamp) != 15 || stamp[8] != '-') return false;
     for (unsigned i = 0; i < 15; ++i) if (i != 8 && (stamp[i] < '0' || stamp[i] > '9')) return false;
@@ -72,7 +87,7 @@ inline void write_sequence(const char* root, uint32_t next) {
 }
 
 // Creates the next numbered folder for a "YYYYMMDD-HHMMSS" stamp.
-inline bool create_at(const char* root, const char* stamp, char* out, size_t out_size) {
+inline bool create_at(const char* root, const char* stamp, char* out, size_t out_size,bool flat=false) {
     if (!out || !out_size) return false;
     out[0] = 0;
     if (!root || !valid_stamp(stamp)) return false;
@@ -83,7 +98,7 @@ inline bool create_at(const char* root, const char* stamp, char* out, size_t out
     bool any = false;
     while (const dirent* entry = ::readdir(dir)) {
         uint32_t number;
-        if (!numbered(entry->d_name, number)) continue;
+        if (!numbered(entry->d_name, number)&&!flat_report(entry->d_name,number)) continue;
         any = true;
         if (number == UINT32_MAX) { ::closedir(dir); return false; }
         if (number >= next) next = number + 1;
@@ -93,6 +108,7 @@ inline bool create_at(const char* root, const char* stamp, char* out, size_t out
     for (unsigned attempt = 0; attempt < 1000 && next != UINT32_MAX; ++attempt, ++next) {
         const int n = std::snprintf(out, out_size, "%s/%03lu-dump-%s", root, (unsigned long)next, stamp);
         if (n < 0 || size_t(n) >= out_size) break;
+        if(flat){write_sequence(root,next+1);return true;}
         if (::mkdir(out, 0777) == 0) { write_sequence(root, next + 1); return true; }
         if (errno != EEXIST) break;
     }
@@ -106,10 +122,10 @@ inline bool stamp_now(char (&stamp)[32]) {
     return calendar && std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", calendar) == 15;
 }
 
-inline bool create(char* out, size_t out_size, const char* root = root_directory) {
+inline bool create(char* out, size_t out_size, const char* root = root_directory,bool flat=false) {
     char stamp[32];
     if (!stamp_now(stamp)) { if (out && out_size) out[0] = 0; return false; }
-    return create_at(root, stamp, out, out_size);
+    return create_at(root, stamp, out, out_size,flat);
 }
 
 struct DeleteResult { unsigned removed = 0, failed = 0; };
@@ -144,6 +160,12 @@ inline DeleteResult delete_all(const char* root = root_directory) {
         ::rewinddir(dir);
         while (const dirent* entry = ::readdir(dir)) {
             uint32_t number;
+            if(flat_report(entry->d_name,number)){
+                char file[max_path+64];
+                if(std::snprintf(file,sizeof file,"%s/%s",root,entry->d_name)<int(sizeof file)&&::unlink(file)==0)++result.removed;
+                else ++result.failed;
+                continue;
+            }
             if (!numbered(entry->d_name, number)) continue;
             if (count == 64) { more = true; break; }
             if (std::snprintf(folders[count], max_path, "%s/%s", root, entry->d_name) < int(max_path)) ++count;

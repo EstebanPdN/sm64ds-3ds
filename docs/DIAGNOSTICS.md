@@ -10,7 +10,8 @@ counter/subsystem trace context rather than only the lowest FPS number.
 
 | Shortcut | Action |
 | --- | --- |
-| L + R + A | Full diagnostic capture when enabled. |
+| L + R + A | Four numbered files directly in dumps/: top and bottom BMPs, info.txt and graphics.zip with renderer data and frame trace. |
+| Developer → Dump RAM | Full compressed process capture when Full RAM dumps is enabled. |
 | L + R + B | Partial capture without process RAM. |
 | L + R + X | Delete diagnostic dumps; use deliberately. |
 
@@ -37,9 +38,22 @@ OS activity have independent timing; inaccessible memory is reported rather
 than invented. Detailed formats, coverage and reader limitations are in
 [NATIVE_RAM_DIAGNOSTICS.md](NATIVE_RAM_DIAGNOSTICS.md).
 
+## Packed memory (BUILD 140)
+
+Since BUILD 140, `memory.vm` (and the test mode's `memoria.vm`) is written as
+SM64VMZ1: the SM64VM1 header and region records unchanged, each region's
+bytes in 512 KiB blocks stored as all-zero (nothing written), raw, or one
+LZ4 block when that is smaller. A level dump is about 11-13 MB instead of
+90 MB. The writer borrows a 2 MiB workspace from linear memory only while
+the file is written (that range reads back as zeros); without it, it writes
+plain SM64VM1 and logs so. The log line `Native diagnostic pack: ...` gives
+the copy, compression and SD times. Every reader expands the file
+transparently; `tools/vm_packed.py expand` writes the plain SM64VM1 bytes.
+
 ## Local analysis
 
 ```sh
+python3 tools/vm_packed.py --help
 python3 tools/inspect_luma_dump.py --help
 python3 tools/inspect_integrated_vm.py --help
 python3 tools/read_mapped_capture.py --help

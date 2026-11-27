@@ -146,6 +146,11 @@ struct Material {
     // DS POLYGON_ATTR bit 15: the image's fog applies to this polygon. Only
     // set while the fog experiment is on (see ds_fog.hpp).
     bool fog = false;
+    // BUILD140: DS polygon ID 1. Every SM64DS shadow is drawn with ID 1
+    // (ShadowModel::RenderAll) and the DS draws no shadow over a pixel of its
+    // own ID: characters, trees and most actors carry ID 1, so their own
+    // shadow volume never darkens them; the stage (ID 0) still receives it.
+    bool shadow_id = false;
     bool operator==(const Material& b) const noexcept;
 };
 bool valid(const Material& material) noexcept;
@@ -222,6 +227,9 @@ struct Statistics {
     std::uint64_t rejected = 0;
     std::uint64_t wait_ticks = 0, submit_ticks = 0, upload_ticks = 0;
     std::uint64_t sdk_draw_ticks=0,sdk_draw_samples=0;
+    // BUILD140, measured with timings off too: this image's GPU/LCD waits, and
+    // the overlapped second image's submit_overlapped entry/exit ticks.
+    std::uint64_t blocked_ticks=0,tail_begin_tick=0,tail_end_tick=0;
     std::size_t live_linear_bytes = 0, peak_linear_bytes = 0;
     // Renderer-owned render textures and their depth attachments. External
     // LCD targets/SDK metadata are not included in these resource counters.

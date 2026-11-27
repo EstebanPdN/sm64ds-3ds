@@ -17,10 +17,14 @@ int main(int argc,char** argv){
     check(packed_assets::lookup("../build/assets/files.tsv")==-1,"traversal refused");
     {const auto result=packed_assets::verify(argv[1]);check(result.ok,result.error.c_str());check(result.root=="s64:","mounted asset root");}
     {const auto result=packed_assets::verify(argv[1],cancel);check(!result.ok&&result.error.find("Cancelled during")==0,"cancel verification");}
+    {const auto result=packed_assets::verify(argv[1]);check(result.ok,"verify after cancellation");}
+    unsigned cached_members=0,cached_bytes=0;
     unsigned char a[8192],b[8192];
     for(unsigned i=0;i<packed_assets::count;++i){
         const auto& entry=rom_install_manifest::files[i];check(packed_assets::lookup(entry.path)==int(i),"lookup all entries");
         packed_assets::Stream stream{},other{};check(stream.open(argv[1],i)&&other.open(argv[1],i),"two independent streams");
+        if(stream.cached){++cached_members;cached_bytes+=entry.size;
+            check(packed_assets::cache_member(entry.path,entry.size)&&stream.cached==other.cached,"shared immutable cached payload");}
         char path[2048];std::snprintf(path,sizeof(path),"%s/%s",argv[2],entry.path);auto* file=std::fopen(path,"rb");check(file,"open canonical file");
         uint32_t done=0;
         while(done<entry.size){const auto size=entry.size-done<sizeof(a)?entry.size-done:sizeof(a);
@@ -32,6 +36,8 @@ int main(int argc,char** argv){
         check(!std::fclose(file)&&!stream.close()&&!other.close(),"all streams close");
     }
     // Shared reader (3DS: one SD handle): members read at package offsets match too.
+    check(cached_members>0&&cached_bytes<=packed_assets::small_budget,"bounded level asset cache populated");
+    std::printf("cached %u members, %u bytes\n",cached_members,cached_bytes);
     static int shared_fd=-1;shared_fd=::open(argv[1],O_RDONLY);check(shared_fd>=0,"open shared package");
     packed_assets::shared_read=[](uint64_t offset,void* output,std::size_t amount)->std::size_t{
         const auto got=::pread(shared_fd,output,amount,off_t(offset));return got<0?0:std::size_t(got);};

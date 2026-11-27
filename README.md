@@ -6,11 +6,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01">Download beta-01</a> ·
+  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-02">Download beta-02</a> ·
   <a href="https://estebanpdn.github.io/super-mario-64-ds.html#install">Data preparation guide</a> ·
   <a href="#features">Features</a> ·
   <a href="#documentation">Documentation</a> ·
-  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01">Changelog</a> ·
+  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-02">Changelog</a> ·
   <a href="CONTRIBUTING.md">Contribute</a> ·
   <a href="#community-and-bug-reports">Community</a>
 </p>
@@ -18,7 +18,7 @@
 <p align="center">
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/status.svg" alt="Status: in development" height="22"></a>
   <a href="docs/COMPATIBILITY.md"><img src="docs/images/badges/platform.svg" alt="Target: Old and New Nintendo 3DS" height="22"></a>
-  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01"><img src="docs/images/badges/version.svg" alt="Public beta-01" height="22"></a>
+  <a href="https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-02"><img src="docs/images/badges/version.svg" alt="Public beta-02" height="22"></a>
   <a href="LICENSE.md"><img src="docs/images/badges/license.svg" alt="Component-specific licenses" height="22"></a>
 </p>
 
@@ -40,8 +40,8 @@ analog movement, a touch interface and configurable camera and presentation.
 
 This project was developed with the help of [OpenAI Codex](https://openai.com/codex/). Learn more about the development process [here](AI_DEVELOPMENT.md).
 
-[**Download beta-01**](https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-01). This first public beta uses
-the native renderer from BUILD 142. It targets Old and New Nintendo 3DS
+[**Download beta-02**](https://github.com/EstebanPdN/sm64ds-3ds/releases/tag/beta-02). This second public beta uses
+the native renderer from BUILD 148. It targets Old and New Nintendo 3DS
 systems, with hardware compatibility and performance still under testing.
 
 ## Features
@@ -69,8 +69,8 @@ and the [automatic test mode](docs/TEST_MODE.md) used to measure it.
 
 Use your own European Super Mario 64 DS dump (**ASMP, revision 0**).
 
-- **CIA / HOME Menu.** Copy the extracted `.nds` or a verified `prepared.sm64ds` to `SD:/3ds/sm64ds/`. Install `SM64DS-Beta-01.cia` with FBI. The CIA includes the renderer banks and can prepare your ROM on first launch.
-- **3DSX / Homebrew Launcher.** Run the [beta-01 converter](https://github.com/EstebanPdN/sm64ds-3ds/blob/beta-01/tools/native_renderer/README.md) on your computer. Copy `prepared.sm64ds`, `build142-data.bin`, the entire `native/` folder and the release 3DSX into `SD:/3ds/sm64ds/`.
+- **CIA / HOME Menu.** Copy the extracted `.nds` or a verified `prepared.sm64ds` to `SD:/3ds/sm64ds/`. Install `SM64DS-Beta-02.cia` with FBI. The CIA includes the renderer banks and can prepare your ROM on first launch.
+- **3DSX / Homebrew Launcher (beta-01 only).** Run the [beta-01 converter](https://github.com/EstebanPdN/sm64ds-3ds/blob/beta-01/tools/native_renderer/README.md) on your computer. Copy `prepared.sm64ds`, `build142-data.bin`, the entire `native/` folder and the release 3DSX into `SD:/3ds/sm64ds/`.
 
 Keep your saves and settings in place. Launch the game, then touch the star on the lower screen to continue.
 

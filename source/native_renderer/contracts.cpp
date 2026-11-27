@@ -141,7 +141,7 @@ bool Material::operator==(const Material& b) const noexcept {
         depth_test == b.depth_test && depth_write == b.depth_write && sample_alpha==b.sample_alpha && alpha_cutoff == b.alpha_cutoff &&
         uv_mode==b.uv_mode && (uv_mode==UvMode::fixed?fixed_uv==b.fixed_uv:
             uv_mode==UvMode::normal?normal_uv()==b.normal_uv():uv==b.uv) &&
-        tint == b.tint && brightness==b.brightness && fog==b.fog && wrap_s == b.wrap_s && wrap_t == b.wrap_t;
+        tint == b.tint && brightness==b.brightness && fog==b.fog && shadow_id==b.shadow_id && wrap_s == b.wrap_s && wrap_t == b.wrap_t;
 }
 bool valid(const Material& m) noexcept {
     if(m.uv_mode==UvMode::affine){for(float v:m.uv)if(!std::isfinite(v))return false;}

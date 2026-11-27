@@ -15,6 +15,7 @@ draws the expected image. Frame times count only from a physical console.
 | --- | --- |
 | SELECT+START | Tour of all 50 levels, each from a fresh boot. |
 | R+SELECT+START, inside a level | The same entrance script at the current spot. |
+| L+SELECT+START (BUILD 137) | Player journey: the game played from the title on a new save. |
 
 1. Choose **Lock FPS** in the pause menu first (30, 60 or Unlocked; Auto is
    30 on an Old 3DS and 60 on a New 3DS). The tour keeps that choice.
@@ -33,6 +34,50 @@ then up to four zones beside live actors with three situations each. A
 death repeats the action; leaving the level restarts it up to three times.
 The run plays on its own save file (`prueba/partida.sav`); the owner's save
 is never read or written. About 1.5–2 minutes per level on a console.
+
+## Player journey (BUILD 137)
+
+L+SELECT+START plays the game like a person, on its own new save
+(`prueba/partida.sav`): it touches TOUCH TO START, Adventure and File A,
+watches the whole opening (a text is advanced with A only while it waits for
+A), reads Lakitu's text, walks Yoshi across the castle grounds with
+camera-independent closed-loop steering (the game maps the Circle Pad to the
+world through the camera with a reflection) and pushes the castle door. A new
+game finds that door locked (the key is with the garden rabbit, not chased
+yet), which ends phase 1. One report per step (9) goes to
+`prueba/NN/jugador/`, and `resultado.txt` ends with the verdict, the texts
+advanced, the stuck-jumps, the route point reached and the number of hangs
+the watchdog detected. Logic and tests: `test_mode_journey.hpp`,
+`tests/native_renderer/test_mode_journey.cpp`. Azahar (Old, 100 % clock):
+complete in 164 s, 9/9 reports, no hang.
+
+## Hang watchdog (BUILD 137, always on)
+
+A thread at priority 0x2c on the application core checks every 250 ms that
+game updates, finished images and `aptMainLoop` entries keep coming. When the
+picture stops for 6 s while the game runs, the game stops for 15 s,
+`aptMainLoop` is not reached for 15 s, a pending HOME/POWER waits 5 s, the
+GPU completes nothing for 2 s, or a test-mode report or dump runs past 60 s,
+it writes
+`sdmc:/3ds/sm64ds/cuelgues/cuelgue-NN.txt` (reason, scene, menu state, every
+thread's last stage and its age, counters, audio and GPU state, the last 64
+breadcrumbs), `cuelgue-NN-log.txt` (the unwritten part of the log buffer) and
+`cuelgue-NN-memoria.bin` (the game's .data/.bss block, at most 32 MB; the
+emergency-exit report omits it), and lights the LED
+red. It writes through FS:USER only and formats integers only, so it never
+takes a stdio, newlib or heap lock a stuck thread may hold. When HOME or
+POWER stays unanswered for 20 s it asks APT to close the application from a
+helper thread created at start, then calls `svcExitProcess` after 1.5 s, so
+the HOME Menu returns (`cuelgue-sin-salida.txt` disables that; unverified on
+hardware, Azahar does not deliver HOME). A poll gap above 2 s (sleep mode or
+a suspended process) resets the clocks instead of reporting. GX waits are
+bounded by `--wrap=gxCmdQueueWait`: it waits in 100 ms slices and gives up
+only after 20 slices in which the queue's `curEntry`/`lastEntry` did not
+move, so a long but progressing queue is never cut. The GPU is then marked
+unusable (report reason `la GPU no responde`) and the backend stops issuing
+GX work and skips captures; the picture freezes but HOME keeps working.
+Development faults (.3dsx `env.txt`): `SM64DS_DEV_FAULT=hang-render:N` and
+`hang-game:N`.
 
 ## What is written to the SD card
 

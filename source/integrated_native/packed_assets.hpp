@@ -3,6 +3,9 @@
 // no archive-controlled paths or lengths reach the filesystem or game allocator.
 #include "rom_bootstrap.hpp"
 #include <array>
+#ifdef __3DS__
+#include <3ds/allocator/linear.h>
+#endif
 #include <fcntl.h>
 #include "rom_discovery.hpp"
 namespace packed_assets {
@@ -53,8 +56,30 @@ inline rom_discovery::Result next(const char* directory,const char* after=""){
         return out;
     }catch(const std::bad_alloc&){rom_discovery::detail::error(out,rom_discovery::Failure::Memory,"Package discovery memory",directory,ENOMEM);return out;}
 }
+inline std::array<uint32_t,count> small_offsets{};
+inline unsigned char* small_bytes=nullptr;
+inline char small_path[1024]{};
+inline constexpr size_t small_budget=768*1024;
+inline bool small_ready=false;
+inline bool cache_member(const char* path, size_t size){
+    constexpr char prefix[]="extracted/dsd/files/data/";
+    if(!size||std::strncmp(path,prefix,sizeof(prefix)-1))return false;
+    const char* name=path+sizeof(prefix)-1;
+    if(!std::strncmp(name,"player/",7)||!std::strncmp(name,"2D_cad/",7)||!std::strncmp(name,"sound/",6))return false;
+    return size<=2400||(size<=4096&&!std::strncmp(name,"wipe/",5));
+}
+inline void verified_path(const char* path){
+    small_path[0]=0;
+    if(small_ready&&std::strlen(path)<sizeof small_path)std::strcpy(small_path,path);
+}
 inline rom_bootstrap::Result verify(const char* path,rom_bootstrap::Callback callback=nullptr,void* context=nullptr){
     rom_bootstrap::Result out;
+    if(!std::strcmp(path,small_path))small_path[0]=0;
+    // The manifest pins every member. Once verified, payloads and offsets stay
+    // immutable for all open streams, including during another verification.
+    const bool populate=!small_ready;
+    if(populate)small_offsets.fill(0);
+    size_t used=0;
     try{
         rom_bootstrap::detail::FileHandle file;file.file=std::fopen(path,"rb");
         if(!file.file){out.error="Cannot open .sm64ds package";return out;}
@@ -69,6 +94,13 @@ inline rom_bootstrap::Result verify(const char* path,rom_bootstrap::Callback cal
         unsigned char header[header_bytes];
         if(std::fread(header,1,sizeof header,file.file)!=sizeof header||!header_valid(header,sizeof header)){
             out.error="Incompatible .sm64ds package header";return out;}
+        if(populate&&!small_bytes){
+#ifdef __3DS__
+            small_bytes=static_cast<unsigned char*>(linearAlloc(small_budget));
+#else
+            small_bytes=static_cast<unsigned char*>(std::malloc(small_budget));
+#endif
+        }
         std::array<unsigned char,rom_bootstrap::detail::buffer_bytes> fallback{};
         constexpr std::size_t large=512*1024;
         struct Block {unsigned char* data=nullptr;~Block(){std::free(data);}} block;
@@ -78,6 +110,8 @@ inline rom_bootstrap::Result verify(const char* path,rom_bootstrap::Callback cal
         uint64_t done=0,unread=rom_install_manifest::total_bytes;std::size_t have=0,at=0;
         for(std::size_t i=0;i<count;++i){const auto& entry=rom_install_manifest::files[i];uint32_t left=entry.size,crc=0xffffffffu;
             if(i&&std::strcmp(rom_install_manifest::files[i-1].path,entry.path)>=0){out.error="Invalid packed manifest order";return out;}
+            const bool retain=populate&&small_bytes&&left<=small_budget-used&&cache_member(entry.path,left);
+            if(retain)small_offsets[i]=uint32_t(used+1);
             while(left){
                 if(at==have){
                     const auto want=std::size_t(unread<capacity?unread:capacity);
@@ -85,11 +119,14 @@ inline rom_bootstrap::Result verify(const char* path,rom_bootstrap::Callback cal
                     unread-=want;have=want;at=0;
                 }
                 const auto n=std::size_t(left)<have-at?std::size_t(left):have-at;
+                if(retain){std::memcpy(small_bytes+used,buffer+at,n);used+=n;}
                 crc=rom_bootstrap::detail::crc_update(crc,buffer+at,n);at+=n;done+=n;left-=uint32_t(n);
                 if(at==have&&!rom_bootstrap::detail::notify(callback,context,out,"verify-cache",done,rom_install_manifest::total_bytes,unsigned(i),unsigned(count)))return out;}
             if((crc^0xffffffffu)!=entry.crc32){out.error="Damaged .sm64ds package; recreate it on your computer";return out;}
         }
         if(!file.close(out,path))return out;
+        if(populate&&small_bytes)small_ready=true;
+        verified_path(path);
         out.ok=true;out.reused=unsigned(count);out.root="s64:";return out;
     }catch(const std::bad_alloc&){out.error="Insufficient memory for .sm64ds package";return out;}
 }
@@ -101,14 +138,15 @@ inline SharedRead shared_read=nullptr;
 // Each open has an independent position, so game/prefetch threads never
 // share a seek position. Only constant metadata and the mounted path are global.
 struct Stream {
-    std::FILE* file=nullptr;uint32_t base=0,size=0;int64_t position=0;bool shared=false;
+    std::FILE* file=nullptr;uint32_t base=0,size=0;int64_t position=0;bool shared=false;const unsigned char* cached=nullptr;
     bool open(const char* archive,unsigned index){
         if(index>=count||file||shared)return false;
-        if(shared_read)shared=true;
+        if(small_ready&&small_offsets[index]&&std::strcmp(archive,small_path)==0){cached=small_bytes+small_offsets[index]-1;shared=true;}
+        else if(shared_read)shared=true;
         else{file=std::fopen(archive,"rb");if(!file)return false;}
         base=offsets[index];size=rom_install_manifest::files[index].size;position=0;return true;
     }
-    int close(){shared=false;auto* old=file;file=nullptr;return old?std::fclose(old):0;}
+    int close(){cached=nullptr;shared=false;auto* old=file;file=nullptr;return old?std::fclose(old):0;}
     int64_t seek(int64_t value,int whence){
         int64_t origin;if(whence==SEEK_SET)origin=0;else if(whence==SEEK_CUR)origin=position;else if(whence==SEEK_END)origin=size;else return -1;
         // Bound logical offsets to signed 32-bit newlib off_t, without overflow.
@@ -118,6 +156,7 @@ struct Stream {
     std::size_t read(void* output,std::size_t amount){
         if(!file&&!shared){errno=EBADF;return 0;}if(position>=size)return 0;
         const auto available=std::size_t(size-position);if(amount>available)amount=available;
+        if(cached){std::memcpy(output,cached+position,amount);position+=amount;return amount;}
         if(shared){const auto got=shared_read(uint64_t(base)+uint64_t(position),output,amount);position+=int64_t(got);return got;}
         if(std::fseek(file,long(base+position),SEEK_SET)){errno=EIO;return 0;}
         const auto got=std::fread(output,1,amount,file);position+=int64_t(got);return got;

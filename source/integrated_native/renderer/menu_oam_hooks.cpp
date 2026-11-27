@@ -190,6 +190,10 @@ extern "C" void __wrap_func_ov007_020c121c(void* resource){
 extern "C" void __wrap_func_ov007_020c0eb0(void* destination,const void* source,int x,int y,unsigned char priority,int flip,int mosaic,int affine){
     using namespace sm64ds::render::game_hooks;
     if(!native_2d_active()||!sink){__real_func_ov007_020c0eb0(destination,source,x,y,priority,flip,mosaic,affine);return;}
+    // BUILD137: a dry update's image is discarded whole (Old 3DS presents one
+    // of the menu's two 60 Hz updates); native mode never writes the original
+    // OAM, so skipping the capture leaves no state behind.
+    if(dry())return;
     const auto start=clock_source?clock_source():0;produce(destination,source,x,y,priority,flip,mosaic,affine);
     if(clock_source)counters.capture_ticks+=clock_source()-start;
 }

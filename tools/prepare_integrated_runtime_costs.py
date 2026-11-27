@@ -54,9 +54,7 @@ def prepare(output):
     tree.write_text(name,text)
     name='port/platform/3ds/game_entry.cpp';text=tree.read_text(name)
     text=once(text,' setenv("SM64DS_GAME_TRACE_INPUT","1",1);',
-        ' // Input telemetry is enabled after saved Developer settings load.')
-    text=once(text,' enhance::boot_apply();',
-        ' enhance::boot_apply();\n if(enhance::live().developer_dumps.load(std::memory_order_relaxed))setenv("SM64DS_GAME_TRACE_INPUT","1",1);')
+        ' // Leave per-input SD logging off unless explicitly requested.')
     tree.write_text(name,text)
     name='port/platform/3ds/game_main.cpp';text=tree.read_text(name)
     text=once(text,' if(native_diagnostics::enabled() && current_scene==1 && frame>=900 && frame<1800){',

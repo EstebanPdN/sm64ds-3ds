@@ -55,6 +55,7 @@ bool g_settings_announced = false;
 std::atomic<uint32_t> g_total_presents{0};
 std::atomic<uint32_t> g_frames{0};
 uint64_t g_pause_image_key=0;
+bool g_pause_image_shown=false; // the shown image came from sm64ds_native_pause_image
 uint64_t g_diagnostics_tick=0;
 uint32_t g_diagnostics_frames=0;
 std::atomic<uint32_t> g_frame_us_total{0};
@@ -132,40 +133,43 @@ uint32_t filter_input(uint32_t held, uint32_t down, bool& touch_allowed) {
             g_diagnostics_tick=now;g_diagnostics_frames=frames;
         }
     }else {
-        if(was_open){c.hide();g_pause_image_key=0;}
+        if(was_open){c.hide();g_pause_image_key=0;g_pause_image_shown=false;}
         const uint64_t key=pause_image_key;
+        // BUILD139: a new image replaces the shown one without a gap. Hiding
+        // first left the lower screen without any native image until the
+        // worker had consumed the previous one (several images on the Old
+        // 3DS), and the original DS layers showed through: a ghost behind
+        // the option buttons and screens appearing out of order.
         if(key){
-            if(key!=g_pause_image_key)c.hide();
             if((key!=g_pause_image_key||was_open||!c.visible.load(std::memory_order_relaxed))&&c.allocate(320,240)){
-                if(auto* img=c.writable()){sm64ds_native_pause_image(img);c.publish();g_pause_image_key=key;}
+                if(auto* img=c.writable()){sm64ds_native_pause_image(img);c.publish();g_pause_image_key=key;g_pause_image_shown=true;}
             }
         }else if(sm64ds_render60_scene&&sm64ds_render60_scene()==1){
             constexpr uint64_t title_version_key=0x4000000000000000ull;
-            if(g_pause_image_key!=title_version_key)c.hide();
             if((g_pause_image_key!=title_version_key||was_open||!c.visible.load(std::memory_order_relaxed))&&c.allocate(320,240))if(auto* img=c.writable()){
                 std::memset(img,0,320*240*sizeof(uint32_t));
                 struct VersionCanvas {uint32_t* pixels;void pixel(int x,int y,uint32_t color){pixels[y*320+x]=color;}} canvas{img};
-                native_lower::version(canvas);c.publish();g_pause_image_key=title_version_key;
+                native_lower::version(canvas);c.publish();g_pause_image_key=title_version_key;g_pause_image_shown=false;
             }
         }else if(sm64ds_intro_skip_hint()){
-            if(g_pause_image_key!=~uint64_t(0))c.hide();
             if(g_pause_image_key!=~uint64_t(0)&&c.allocate(320,240))if(auto* img=c.writable()){
                 std::memset(img,0,320*240*sizeof(uint32_t));
                 struct HintCanvas { uint32_t* pixels; void pixel(int x,int y,uint32_t color){pixels[y*320+x]=color;} } canvas{img};
                 native_lower::frame(canvas,90,205,140,28);
                 native_lower::centered(canvas,211,"Start to omit",0xff8d4300);
-                c.publish();g_pause_image_key=~uint64_t(0);
+                c.publish();g_pause_image_key=~uint64_t(0);g_pause_image_shown=false;
             }
         }else if(camera_hud){
-            if(g_pause_image_key!=native_gameplay_camera::image_key)c.hide();
             if((g_pause_image_key!=native_gameplay_camera::image_key||was_open||!c.visible.load(std::memory_order_relaxed))&&c.allocate(320,240)){
                 if(auto* img=c.writable()){
-                    native_gameplay_camera::render(img);c.publish();g_pause_image_key=native_gameplay_camera::image_key;
+                    native_gameplay_camera::render(img);c.publish();g_pause_image_key=native_gameplay_camera::image_key;g_pause_image_shown=false;
                 }
             }
-        }else{c.hide();g_pause_image_key=0;}
+        }else{c.hide();g_pause_image_key=0;g_pause_image_shown=false;}
     }
-    native_lower::wanted.store(!g_diagnostics_open&&pause_image_key&&pause_image_key==g_pause_image_key&&c.visible.load(std::memory_order_acquire),std::memory_order_release);
+    // The original lower layers stay replaced while a pause/options image is
+    // on screen, also while its successor waits to be published.
+    native_lower::wanted.store(!g_diagnostics_open&&pause_image_key&&g_pause_image_shown&&c.visible.load(std::memory_order_acquire),std::memory_order_release);
     if(was_open && !g_diagnostics_open)g_hide_until_release=held&KEY_SELECT;
     g_hide_until_release&=held;
     update_fps_strip();

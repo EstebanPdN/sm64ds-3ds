@@ -21,6 +21,17 @@ struct AffineImage {
     const void* foreground_base=nullptr;
     std::uint64_t foreground_base_generation=0;
     std::uint32_t foreground_bands=~0u;
+    // BUILD141: text BG layers drawn over the map, back to front, each
+    // sampled at (x+hofs, y+vofs) with wrap; key changes when its pixels do.
+    // With layers, behind holds the OBJs between the map and the layers and
+    // foreground only the OBJs in front of them.
+    struct Layer {const std::uint32_t* pixels=nullptr;std::uint64_t key=0;unsigned width=0,height=0;std::int32_t hofs=0,vofs=0;};
+    Layer layer[3]{};unsigned layers=0;
+    const std::uint32_t* behind=nullptr;
+    // BUILD141: one per preparation of the foreground, behind plane and
+    // layers; a held image (the previous capture's map copied) keeps it, so
+    // its uploads are skipped. 0: unknown, always compared.
+    std::uint64_t serial=0;
 };
 inline bool valid(const AffineImage& image) noexcept {
     return image.pixels&&image.foreground&&image.generation&&

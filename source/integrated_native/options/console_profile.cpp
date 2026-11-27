@@ -10,10 +10,10 @@ const Profile& current() {
         bool new_model = false;
         if (R_FAILED(APT_CheckNew3DS(&new_model))) new_model = false;
         const Profile p = make(new_model, uint32_t(osGetMemRegionSize(MEMREGION_APPLICATION)));
-        std::printf("Console profile model=%s appMemoryMiB=%u largeMemory=%u gpuTexturesMiB=%u decodedTexturesMiB=%u levelPreloadMiB=%u workerCore=%d\n",
+        std::printf("Console profile model=%s appMemoryMiB=%u largeMemory=%u gpuTexturesMiB=%u decodedTexturesMiB=%u levelPreloadMiB=%u workerCore=%d nativeGpuMiB=%u linearMiB=%u linearFree=%u\n",
                     p.new_model ? "new" : "old", unsigned(p.app_memory >> 20), unsigned(p.large_memory),
                     unsigned(p.gpu_textures >> 20), unsigned(p.decoded_textures >> 20), unsigned(p.level_preload >> 20),
-                    p.worker_core);
+                    p.worker_core,unsigned(p.native_gpu>>20),p.linear_mib,unsigned(linearSpaceFree()));
         return p;
     }();
     return profile;

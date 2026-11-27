@@ -303,6 +303,9 @@ else()
   add_executable(test_native_test_mode_script tests/native_renderer/test_mode_script.cpp)
   target_compile_options(test_native_test_mode_script PRIVATE -UNDEBUG -Wall -Wextra -Werror)
   add_test(NAME native_test_mode_script COMMAND test_native_test_mode_script)
+  add_executable(test_native_test_mode_journey tests/native_renderer/test_mode_journey.cpp)
+  target_compile_options(test_native_test_mode_journey PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+  add_test(NAME native_test_mode_journey COMMAND test_native_test_mode_journey)
   add_executable(test_native_wave_grid tests/native_renderer/wave_grid.cpp)
   target_link_libraries(test_native_wave_grid PRIVATE sm64ds_renderer_contracts)
   target_compile_options(test_native_wave_grid PRIVATE -UNDEBUG -Wall -Wextra -Werror)
@@ -594,6 +597,10 @@ else()
   add_test(NAME native_vertex_lighting COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/tests/native_renderer/test_vertex_lighting.py"
     "$<TARGET_FILE:test_native_vertex_lighting>" "$<TARGET_FILE:native_lighting_uniforms>")
+  add_test(NAME native_check_pica_hardware COMMAND "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/tests/native_renderer/test_check_pica_hardware.py")
+  add_test(NAME native_vm_packed COMMAND "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/tests/test_vm_packed.py")
   add_executable(test_native_batch tests/native_renderer/native_batch.cpp)
   target_link_libraries(test_native_batch PRIVATE sm64ds_renderer_contracts)
   target_compile_options(test_native_batch PRIVATE -UNDEBUG -Wall -Wextra -Werror)

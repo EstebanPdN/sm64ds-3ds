@@ -84,6 +84,27 @@ def block(text,anchor):
     raise ValueError('Unbalanced native pause source')
 
 
+def pause_buttons(text):
+    for state, count in ((1, 4), (3, 4), (5, 3)):
+        start, end, _ = block(text, f'    case {state}: {{')
+        case = text[start:end]
+        # Declare the slot once outside all selection labels. Physical A/B can
+        # then dispatch to exactly the same action as an original touch.
+        case = case.replace('            u8 slot = data_020a0e40;\n', '')
+        anchor = '        if (data_0209f300 != 0)\n            return;'
+        choices = '\n'.join(f'        case {i}: goto sel{state}_{i};' for i in range(count))
+        case = once(case, anchor, anchor + f"""
+        u8 slot = data_020a0e40;
+#if {GUARD}
+        switch (sm64ds_native_pause_choice()) {{
+        case -2: return;
+{choices}
+        }}
+#endif""")
+        text = text[:start] + case + text[end:]
+    return text
+
+
 def patch_sources(decomp):
     tree=GeneratedTree(decomp)
     contents={}
@@ -93,6 +114,7 @@ def patch_sources(decomp):
     name=FILES[0];text=contents[name]
     text=once(text,'struct Stage {',f'''#if {GUARD}
 extern "C" {{
+int sm64ds_native_pause_choice();
 void sm64ds_native_pause_parent(unsigned state);
 void sm64ds_native_pause_begin(int controller);
 void sm64ds_native_pause_update();
@@ -101,6 +123,7 @@ void sm64ds_native_pause_restore_parent();
 #endif
 
 struct Stage {{''')
+    text=pause_buttons(text)
     for entry,controller in [(7,1),(9,0)]:
         anchor=f'    case {entry}: {{';start,end,brace=block(text,anchor);chunk=text[start:end]
         pos=chunk.rfind('        return;')

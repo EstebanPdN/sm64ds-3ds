@@ -161,9 +161,12 @@ int main(){
                     present=(output/'port/platform/3ds/player_present.cpp').read_text()
                     self.assertIn('extern "C" void sm64ds_present_pipeline_exit_stop(){',present)
                     self.assertIn('if(sm64ds_fatal_handlers_install)sm64ds_fatal_handlers_install();',present)
-                    # BUILD124: Old 3DS render worker on core 1 at 80%, mixer on core 0; 30% layout on refusal.
+                    # BUILD124: Old 3DS render worker on core 1 at 80%, mixer on core 0; mixer layout on refusal.
                     self.assertIn('fresh_render_core1=sm64ds_fresh_native_enabled()&&core==1&&sm64ds_fresh_native_render_core1_wanted();',present)
-                    self.assertIn('fresh_render_core1=false;limit=APT_SetAppCpuTimeLimit(30);',present)
+                    self.assertIn('fresh_render_core1=false;limit=APT_SetAppCpuTimeLimit(std::min(percent,audio_limit));',present)
+                    # BUILD137: the mixer's core-1 cap is 50% (audio-cpu.txt: 30-80), 30% when refused.
+                    self.assertIn('static const unsigned audio_limit=[](){unsigned n=50;',present)
+                    self.assertIn('limit=APT_SetAppCpuTimeLimit(30);',present)
                     self.assertIn('int audio_core=fresh_render_core1?0:1;',present)
                     self.assertIn('sm64ds_fresh_native_core_layout(fresh_render_core1,audio_core);',present)
                     entry=(output/'port/platform/3ds/game_entry.cpp').read_text()

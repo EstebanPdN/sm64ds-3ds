@@ -86,7 +86,7 @@ void Menu::value(unsigned i,char* out,unsigned cap)const{
  }
  case Page::Developer:
   if(toggle_row(i))text=toggle_value(i)?"On":"Off";
-  else if(i==1)text=settings_.developer_dumps?"L+R+A":"Disabled";
+  else if(i==1)text=settings_.developer_dumps?"Press A":"Disabled";
   break;
  }
  std::snprintf(out,cap,"%s",text);
@@ -96,14 +96,28 @@ void Menu::finish(bool accept){
  if(accept){if(!(settings_==original_))requests_|=SaveSettings;}
  else{settings_=original_;sound_=original_sound_;}
 }
+// A category page returns to the Options list with its own row selected.
+void Menu::return_to_options(){
+ constexpr Page pages[]={Page::Controller,Page::Audio,Page::Display,Page::Developer,Page::Update};
+ unsigned row=0;
+ for(unsigned i=general_?0:1;i<5;++i)if(pages[i]==page_){row=i-(general_?0:1);break;}
+ page_=Page::Options;selected_=row;footer_=0;
+}
 void Menu::back(){
  if(page_==Page::ConfirmDelete){page_=Page::Developer;selected_=2;}
  else if(page_==Page::Options||direct_controller_)finish(false);
- else{page_=Page::Options;selected_=0;}
+ else return_to_options();
  footer_=0;
 }
 void Menu::activate(int d){
- if(selected_==count()){if(footer_==0)finish(true);else back();return;}
+ // OK on a category page keeps its changes and goes back to Options; only
+ // OK on the Options list (or the direct Controller menu) closes the menu.
+ if(selected_==count()){
+  if(footer_!=0)back();
+  else if(page_==Page::Options||direct_controller_)finish(true);
+  else return_to_options();
+  return;
+ }
  const unsigned i=selected_;
  switch(page_){
  case Page::Options:{
@@ -311,7 +325,20 @@ extern "C" void sm64ds_front_options_update(uint32_t down,bool pen_down,bool pen
  }
  if(changed)paint();
 }
-extern "C" void sm64ds_native_pause_update(){if(!active)return;unsigned slot=data_020a0e40;Input input;input.down=*(reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(&data_020a0e5a)+slot*4));
+extern "C" int sm64ds_native_pause_choice(){
+ const unsigned down=hidKeysDown();
+ if(down&KEY_B)return 0;
+ if(down&KEY_A)return data_0209f2e0;
+ const unsigned count=data_0209f2b4;
+ if(count && (down&(KEY_DUP|KEY_DDOWN|KEY_DLEFT|KEY_DRIGHT))){
+  const unsigned step=down&(KEY_DUP|KEY_DLEFT)?count-1:1;
+  data_0209f2e0=(data_0209f2e0+step)%count;
+  _ZN5Stage17UpdateMenuButtonsEb(0);
+  return -2;
+ }
+ return -1;
+}
+extern "C" void sm64ds_native_pause_update(){if(!active)return;Input input;input.down=hidKeysDown();
  // Native lower-LCD pixels from HID: the menu art is 320x240 whatever the DS image scale.
  {touchPosition pen{};hidTouchRead(&pen);input.touch_down=(hidKeysHeld()&KEY_TOUCH)!=0;input.touch_pressed=(hidKeysDown()&KEY_TOUCH)!=0;input.x=pen.px;input.y=pen.py;}
  bool changed=menu.update(input);auto settings=menu.settings();if(!(settings==enhance::snapshot()))enhance::publish(settings);requests|=menu.take_requests();if(menu.finished()){if(menu.accepted()){SetControllerMode(settings.controller_mode);SetSoundMode(int(menu.sound()));}(void)vram_backup.restore();active=false;if(parent_state){data_0209f1ec=uint8_t(parent_state-1);pending_restore=true;}else{data_0209f2c4=2;data_0209f22c=0;}return;}if(changed)paint();}

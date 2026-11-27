@@ -95,7 +95,7 @@ struct Json {
             unsigned(m.sample_alpha),unsigned(m.alpha_cutoff),static_cast<unsigned long>(m.tint),unsigned(m.uv_mode));
         floats(m.uv);out(",\"brightness\":%d,\"fixed_uv\":{\"coefficient\":",int(m.brightness));integers(m.fixed_uv.coefficient);
         out(",\"dimensions\":[%u,%u],\"offset\":",unsigned(m.fixed_uv.width),unsigned(m.fixed_uv.height));
-        integers(m.fixed_uv.offset);out("}}");
+        integers(m.fixed_uv.offset);out("},\"shadow_id\":%u}",unsigned(m.shadow_id));
     }
     void lighting_material(const LightingMaterial& m) noexcept {
         out("[%u,%u,%u,%u,%u,%u,%u,%u]",unsigned(m.diffuse),unsigned(m.ambient),unsigned(m.specular),unsigned(m.emission),unsigned(m.mask),unsigned(m.use_shininess),unsigned(m.toon),unsigned(m.grey));

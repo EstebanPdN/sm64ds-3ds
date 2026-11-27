@@ -7,13 +7,11 @@ partida controlable ni rendimiento en consola física.
 
 ## Carpeta de dumps (desde el 24 de octubre de 2026)
 
-Atajos en partida (L solo no hace nada): **L+R+A** dump completo (pantallas,
-RAM y VRAM), **L+R+B** dump parcial (pantallas y VRAM, sin RAM), **L+R+X**
-borra los dumps. Full Dump viene activado por defecto; un valor explícito en
-`settings.ini` lo sustituye. Mientras se escribe, la pantalla inferior muestra
-el cuadro DUMPING con su barra de progreso.
+**L+R+A** guarda las pantallas, la traza y el estado del renderizador en cuatro archivos directamente en `dumps/`: dos BMP, un informe de texto y un ZIP técnico con el mismo prefijo. **L+R+B** guarda las pantallas y la VRAM.
+Para incluir toda la memoria del proceso, activa **Full RAM dumps** y pulsa
+**A** sobre **Developer → Dump RAM**. **L+R+X** borra los dumps.
 
-Cada dump es una carpeta `sdmc:/3ds/sm64ds/dumps/NNN-dump-AAAAMMDD-HHMMSS/`
+Cada dump completo o parcial es una carpeta `sdmc:/3ds/sm64ds/dumps/NNN-dump-AAAAMMDD-HHMMSS/`
 (`NNN` consecutivo según `dump-sequence.txt`):
 
 | Fichero | Contenido |
@@ -28,7 +26,7 @@ OAM de las dos pantallas DS de un dump.
 
 ## Dumps del juego integrado (desde el 23 de octubre de 2026)
 
-Cada dump de Developer (L+R+A, Dump RAM o captura automática) congela el juego
+Cada dump completo de Developer (Dump RAM o captura automática) congela el juego
 en su frame hook después de vaciar el worker de presentación y escribe, con el
 mismo nombre base `native-<tick>`:
 

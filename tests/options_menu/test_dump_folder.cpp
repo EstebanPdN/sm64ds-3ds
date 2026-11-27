@@ -31,6 +31,13 @@ int main(){
     // An emptied dumps folder starts again at 000.
     assert(dump_folder::create_at(root.c_str(),"20261024-101501",out,sizeof out));
     assert(std::string(out)==root+"/000-dump-20261024-101501");
+    assert(dump_folder::create_at(root.c_str(),"20261024-101501",out,sizeof out,true));
+    assert(access(out,F_OK)!=0);
+    const std::string stem(out);
+    for(auto ext:{".top-screen.bmp",".bottom-screen.bmp",".info.txt",".graphics.zip"})touch(stem+ext);
+    unlink((root+"/dump-sequence.txt").c_str());
+    assert(dump_folder::create_at(root.c_str(),"20261024-101501",out,sizeof out,true));
+    assert(std::string(out)==root+"/002-dump-20261024-101501");
     deleted=dump_folder::delete_all(root.c_str());
     assert(deleted.failed==0);
     assert(rmdir(root.c_str())==0&&rmdir(temporary)==0);

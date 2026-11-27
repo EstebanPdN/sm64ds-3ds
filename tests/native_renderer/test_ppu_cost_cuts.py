@@ -57,8 +57,13 @@ def build(name,reference,reference_flags,sanitize=False):
     return binary
 
 
-def run(binary,arguments=(),exact_cpu_objects=False):
-    environment={k:v for k,v in os.environ.items() if not k.startswith('PPU_')}
+def run(binary,arguments=(),exact_cpu_objects=False,gpu_alpha=False):
+    environment={k:v for k,v in os.environ.items() if not k.startswith(('PPU_','HARNESS_'))}
+    # BUILD140: the GPU alpha blend changes the candidate's buffers on purpose
+    # (translucent texels). Exact comparisons run with it off; the GPU run
+    # compares the blended pictures with a tolerance instead.
+    if gpu_alpha:environment['HARNESS_GPU_ALPHA']='1'
+    else:environment['PPU_NO_GPU_ALPHA']='1'
     # The pinned CPU path keeps a per-sprite OBJ layer that extended OBJ palette
     # changes do not invalidate. Off, a refused publication's CPU composition
     # can be compared with the picture of a publication (disturbed phase).
@@ -75,6 +80,13 @@ class PpuCostCutTests(unittest.TestCase):
             output=run(binary,exact_cpu_objects=exact)
             print(output,end='');self.assertIn('PASS:',output)
 
+    def test_gpu_alpha_pictures_match_the_switched_off_paths(self):
+        binary=build('cuts-off',CANDIDATE,['-DPPU_COST_CUTS_OFF'])
+        output=run(binary,gpu_alpha=True)
+        print(output,end='');self.assertIn('PASS:',output)
+        blended=int(output.split('gpu_blended=')[1].split()[0])
+        self.assertGreater(blended,0,'no GPU-blended pixel was exercised')
+
     def test_cuts_match_build_133(self):
         old=WORK/'old/ppu_build133.cpp'
         if not old.is_file():self.skipTest('no BUILD 133 copy of ppu.cpp in build/host-ppu/old')
@@ -82,7 +94,10 @@ class PpuCostCutTests(unittest.TestCase):
         # change outputs on purpose: the reference is BUILD 133 with the same fixes.
         sys.path.insert(0,str(ROOT/'tools'))
         from prepare_integrated_native_renderer import ppu_bug_fixes_patch
-        fixed=WORK/'old/ppu_build133_fixed.cpp';fixed.write_text(ppu_bug_fixes_patch(old.read_text()))
+        # BUILD141 added the behind plane argument; BUILD 133 has no layers.
+        adapter=('\nnamespace ntr {\nbool ppu_prepare_native_affine(Engine eng,Framebuffer& foreground,PpuGpuAffineLayer& layer,Framebuffer*){\n'
+                 '    return static_cast<bool(*)(Engine,Framebuffer&,PpuGpuAffineLayer&)>(&ppu_prepare_native_affine)(eng,foreground,layer);\n}\n}\n')
+        fixed=WORK/'old/ppu_build133_fixed.cpp';fixed.write_text(ppu_bug_fixes_patch(old.read_text())+adapter)
         binary=build('build133',fixed,[])
         for exact in (False,True):
             output=run(binary,exact_cpu_objects=exact)

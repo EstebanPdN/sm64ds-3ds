@@ -70,6 +70,35 @@ bool map_vram_windows() {
 '''
 
 
+# BUILD142: the 16 MiB linear heap is the Old 3DS 80 MB split. A New 3DS runs
+# the CIA in its 124 MB mode with 800x240 supersampled targets, and there the
+# rotating map's layers ran the linear heap out ("Native map publication
+# failed: allocation failed"), sending the opening's 2D back to the CPU
+# (10 ms per update). libctru's __system_allocateHeaps is weak: this one is
+# the same split with a mode-dependent linear size (124 MB mode: 32 MiB).
+LINEAR_HEAP_BY_MODE = r"""// BUILD142: linear heap by memory mode (prepare_integrated_memory.py).
+void mappableInit(u32 addrMin,u32 addrMax);
+extern char* fake_heap_start;
+extern char* fake_heap_end;
+extern u32 __ctru_heap,__ctru_heap_size,__ctru_linear_heap;
+void __system_allocateHeaps(void){
+    Handle reslimit=0;
+    if(R_FAILED(svcGetResourceLimit(&reslimit,CUR_PROCESS_HANDLE)))svcBreak(USERBREAK_PANIC);
+    ResourceLimitType type=RESLIMIT_COMMIT;s64 max_commit=0,current_commit=0;
+    svcGetResourceLimitLimitValues(&max_commit,reslimit,&type,1);
+    svcGetResourceLimitCurrentValues(&current_commit,reslimit,&type,1);
+    svcCloseHandle(reslimit);
+    const u32 remaining=u32(max_commit-current_commit)&~0xfffu;
+    if(osGetMemRegionSize(MEMREGION_APPLICATION)>=(100u<<20))__ctru_linear_heap_size=32u<<20;
+    if(__ctru_linear_heap_size+(16u<<20)>remaining)svcBreak(USERBREAK_PANIC);
+    __ctru_heap_size=remaining-__ctru_linear_heap_size;
+    if(R_FAILED(svcControlMemory(&__ctru_heap,OS_HEAP_AREA_BEGIN,0,__ctru_heap_size,MEMOP_ALLOC,MemPerm(MEMPERM_READ|MEMPERM_WRITE))))svcBreak(USERBREAK_PANIC);
+    if(R_FAILED(svcControlMemory(&__ctru_linear_heap,0,0,__ctru_linear_heap_size,MEMOP_ALLOC_LINEAR,MemPerm(MEMPERM_READ|MEMPERM_WRITE))))svcBreak(USERBREAK_PANIC);
+    mappableInit(OS_MAP_AREA_BEGIN,OS_MAP_AREA_END);
+    fake_heap_start=reinterpret_cast<char*>(__ctru_heap);
+    fake_heap_end=fake_heap_start+__ctru_heap_size;
+}"""
+
 def prepare(output):
     tree = GeneratedTree(output)
     name = 'port/ntr/io.cpp'
@@ -87,7 +116,7 @@ def prepare(output):
                 '// Old 3DS 80 MB mode (HOME Menu needs the SYSTEM region). The fresh\n'
                 '// native renderer peaks at 7.0 MiB linear (title menus, hardware) and\n'
                 '// 6.2 MiB in levels; the libc heap needs the rest (BUILD118).\n'
-                'u32 __ctru_linear_heap_size=16*1024*1024;')
+                'u32 __ctru_linear_heap_size=16*1024*1024;\n'+LINEAR_HEAP_BY_MODE)
     tree.write_text(name, text)
     tree.commit()
     return ['port/ntr/io.cpp', 'port/platform/3ds/game_entry.cpp']

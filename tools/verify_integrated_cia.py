@@ -32,7 +32,8 @@ REQUIRED_SERVICES = {'APT:U', 'cfg:u', 'dsp::DSP', 'fs:USER', 'gsp::Gpu',
 # SVC instructions linked by the frozen integrated candidate 277c9139291b55c4.
 # In particular 112 supplies the DS identity-alias fallback; 60 is used by
 # CRT/NDSP/GPU invariant checks. Both are absent from the preview RSF.
-REQUIRED_SVCS = {1, 2, 3, 8, 9, 10, 11, 20, 23, 24, 25, 31, 32, 33,
+# BUILD137: 12 (SetThreadPriority) keeps the game below libctru's APT thread.
+REQUIRED_SVCS = {1, 2, 3, 8, 9, 10, 11, 12, 20, 23, 24, 25, 31, 32, 33,
                  34, 35, 36, 37, 39, 40, 42, 45, 50, 56, 57, 58, 60, 112}
 
 
@@ -235,8 +236,9 @@ def profile(ex, title_id=TITLE_ID):
                 kernel_descriptors=[f'{word:08x}' for word in descriptors])
 
 
-def cia_parts(data, *, native_test=False):
-    title_id = NATIVE_TEST_TITLE_ID if native_test else TITLE_ID
+def cia_parts(data, *, native_test=False, public_beta=False):
+    require(not (native_test and public_beta), 'Select one packaging profile')
+    title_id = NATIVE_TEST_TITLE_ID if native_test or public_beta else TITLE_ID
     require(len(data) >= 0x2020, 'Truncated CIA header')
     head, kind, version, cert_n, ticket_n, tmd_n, meta_n, content_n = struct.unpack_from('<IHHIIIIQ', data)
     require((head, kind, version) == (0x2020, 0, 0), 'Unexpected CIA header')
@@ -310,15 +312,15 @@ def cia_parts(data, *, native_test=False):
                            title_version=struct.unpack_from('>H', tmd, 0x1dc)[0])
 
 
-def verify(cia, elf, expected_elf_sha256=None, *, native_test=False):
+def verify(cia, elf, expected_elf_sha256=None, *, native_test=False, public_beta=False):
     raw, raw_elf = Path(cia).read_bytes(), Path(elf).read_bytes()
     elf_sha = sha(raw_elf)
     if expected_elf_sha256 is not None:
         require(re.fullmatch('[0-9a-fA-F]{64}', expected_elf_sha256) is not None,
                 'Expected ELF SHA-256 must have 64 hexadecimal characters')
         require(elf_sha == expected_elf_sha256.lower(), 'ELF differs from frozen expected hash')
-    ex, files, content = cia_parts(raw, native_test=native_test)
-    title_id = NATIVE_TEST_TITLE_ID if native_test else TITLE_ID
+    ex, files, content = cia_parts(raw, native_test=native_test, public_beta=public_beta)
+    title_id = NATIVE_TEST_TITLE_ID if native_test or public_beta else TITLE_ID
     return dict(status='integrated_cia_structurally_verified_exact_ELF',
                 cia=str(Path(cia).resolve()), bytes=len(raw), sha256=sha(raw),
                 elf=str(Path(elf).resolve()), ELF_sha256=elf_sha,
@@ -340,12 +342,15 @@ def main():
     parser.add_argument('cia', type=Path)
     parser.add_argument('elf', type=Path)
     parser.add_argument('--expected-elf-sha256')
-    parser.add_argument('--native-test', action='store_true',
+    policy = parser.add_mutually_exclusive_group()
+    policy.add_argument('--public-beta', action='store_true',
+                        help='Verify native-renderer title F5365 with external SD data and no RomFS')
+    policy.add_argument('--native-test', action='store_true',
                         help='Verify native-renderer test title F5365 with RomFS; retains the same Old/New memory and access policy')
     parser.add_argument('--report', type=Path, help='New report path; existing files are never replaced')
     args = parser.parse_args()
     try:
-        result = verify(args.cia, args.elf, args.expected_elf_sha256, native_test=args.native_test)
+        result = verify(args.cia, args.elf, args.expected_elf_sha256, native_test=args.native_test, public_beta=args.public_beta)
         output = json.dumps(result, indent=2) + '\n'
         if args.report:
             with args.report.open('x') as stream:

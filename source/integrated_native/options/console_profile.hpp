@@ -22,6 +22,8 @@ struct Profile {
     int worker_core;            // presentation worker core (fallback: core 1)
     unsigned presentation_divisor; // original display events: Old 2, New 1
     bool antialias;             // New: 800x240 geometry downsampled to the LCD
+    std::size_t native_gpu;     // native renderer GPU resources (linear heap)
+    unsigned linear_mib;        // linear heap of the mode (game_entry.cpp)
 };
 
 constexpr uint32_t large_memory_threshold = 100u << 20;
@@ -32,7 +34,9 @@ constexpr Profile make(bool new_model, uint32_t app_memory) {
             large ? std::size_t(12) << 20 : std::size_t(8) << 20,
             large ? std::size_t(16) << 20 : std::size_t(8) << 20,
             large ? std::size_t(8) << 20 : std::size_t(3) << 20,
-            new_model ? 2 : 1,new_model?1u:2u,new_model};
+            new_model ? 2 : 1,new_model?1u:2u,new_model,
+            // BUILD142: the 124 MB mode has a 32 MiB linear heap (Old: 16).
+            large ? std::size_t(20) << 20 : std::size_t(12) << 20,large?32u:16u};
 }
 
 static_assert(make(false, 80u << 20).gpu_textures == 8u << 20, "Old keeps the tested budgets");
@@ -43,6 +47,9 @@ static_assert(make(true, 80u << 20).level_preload == 3u << 20 && make(true, 80u 
               "New 3DS in a small mode: Old memory budgets, its own cores");
 static_assert(make(true, 124u << 20).large_memory && make(true, 124u << 20).decoded_textures == 16u << 20,
               "New 3DS 124 MB mode");
+
+static_assert(make(false,80u<<20).native_gpu==12u<<20&&make(false,80u<<20).linear_mib==16,"Old: BUILD 141 budgets");
+static_assert(make(true,124u<<20).native_gpu==20u<<20&&make(true,124u<<20).linear_mib==32,"New 124 MB: larger GPU budget");
 
 // Detected once on the console (console_profile.cpp).
 const Profile& current();

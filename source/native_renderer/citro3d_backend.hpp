@@ -39,6 +39,10 @@ public:
     // screen one LCD refresh after the first image (fence) or at once.
     Error submit_overlapped(C3D_RenderTarget* target,bool fence,int raised_priority,int normal_priority) noexcept;
     void discard_overlapped() noexcept;
+    // BUILD140: true from the overlapped second image's GPU/LCD waits until
+    // the game hands the worker its next job (worker idle then).
+    bool second_tail() const noexcept {return __atomic_load_n(&second_tail_,__ATOMIC_ACQUIRE);}
+    void clear_second_tail() noexcept {__atomic_store_n(&second_tail_,false,__ATOMIC_RELEASE);}
     Error create_mesh(const MeshView&, Mesh& output) noexcept;
     Error create_mesh_bytes(const MeshBytes&, Mesh& output) noexcept;
     Error create_mesh_group(const MeshGroups&,unsigned group,Mesh& output) noexcept;
@@ -128,6 +132,10 @@ public:
     // depth test darken the pixels holding `reference` and release them, so
     // overlapping volumes darken a pixel once. Needs a stencil target.
     Error draw_shadow(Mesh,const Matrix& mvp,bool mask,std::uint8_t reference) noexcept;
+    // BUILD139/140: while this is on, draws whose material carries DS polygon
+    // ID 1 mark their visible pixels in stencil bit 7; the shadow's darkening
+    // pass skips marked pixels, as the DS skips its shadows' own polygon ID.
+    void mark_shadow_owners(bool on) noexcept {owner_marking_=on;}
     // Fog experiment, for the pass in progress: a PICA fog table (128 values
     // and 128 changes, see ds_fog.hpp) and its colour (red in the low byte)
     // for the materials that carry the fog bit; nullptr draws without fog.
@@ -137,6 +145,14 @@ public:
     // previous image's swap reached the screen, checked at the end of the
     // CPU work instead of at begin() (where the wait would idle the core).
     void set_late_fence(bool value) noexcept {late_fence_=value;}
+    // BUILD137: priority the render worker takes while citro3d holds libctru's
+    // GX queue lock (FrameBegin/FrameEnd). The 0x1A GSP event thread needs that
+    // lock for every GX completion; on the Old 3DS the worker runs below the
+    // game thread, which could preempt it while holding the lock and stall the
+    // GPU side for a whole game update. This narrows that window (command
+    // lists queued mid-frame still take the lock unboosted); it is not the
+    // root-cause fix. -1: no boost (New 3DS, own core).
+    void set_lock_priority(int raised) noexcept {lock_priority_=raised;}
     const Statistics& stats() const noexcept { return stats_; }
     // BUILD131 test-mode dump. The next frame that ends copies its PICA
     // command words and one record per draw into caller storage. Arm and read
@@ -164,7 +180,10 @@ public:
     std::size_t describe_textures(TextureInfo* out,std::size_t capacity) const noexcept;
     struct MeshTotals {unsigned meshes=0,batches=0;std::size_t bytes=0,indices=0;};
     MeshTotals describe_meshes() const noexcept;
+    void stereo_eye(float eye) noexcept {eye_=eye;}
 private:
+    float eye_=0;
+    void upload_matrix(unsigned location,const Matrix&) noexcept;
     FrameCapture capture_{};
     struct MeshResource {
         void* storage = nullptr;
@@ -215,6 +234,7 @@ private:
     LightingCache lighting_cache_{};
     bool lighting_valid_=false,lighting_enabled_=false;
     bool ready_ = false, timings_ = false, present_fence_ = true, late_fence_ = false;
+    int lock_priority_=-1;
     bool program_cache_valid_=true;
     bool retirements_ = false;
     std::size_t budget_ = 0, live_ = 0, peak_ = 0;
@@ -235,6 +255,8 @@ private:
     C3D_FogLut fog_table_{};bool fog_ready_=false;
     // 0 ordinary draw, 1 shadow mask, 2 shadow render; the reference of 1/2.
     std::uint8_t shadow_stage_=0,shadow_reference_=0,bound_shadow_stage_=0,bound_shadow_reference_=0;
+    bool owner_marking_=false;
+    bool second_tail_=false;
     unsigned sdk_sample_phase_=0;
     bool packed_draws_=true;
     IndexedDrawPacket draw_packet_{};

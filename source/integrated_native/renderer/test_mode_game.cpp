@@ -5,12 +5,14 @@
 #include "test_mode.h"
 #include "Player.h"
 #include "Stage.h"
+#include "LVL_Overlay.h"
 #include "SaveData.h"
 #include "dActor_c.h"
 #include "dBgCh_Gnd.h"
 #include <cstring>
 extern "C" {
 void StartFile(signed char level,unsigned char entrance);
+extern const unsigned char* data_02092208[52];
 void _ZN6Player16SetRealCharacterEj(void*,unsigned int);
 extern Player* data_0209f394[];
 extern unsigned char data_0209f2f8;   // current level
@@ -39,10 +41,28 @@ extern "C" int sm64ds_test_game_teleport(unsigned scene,int area,std::int32_t x,
     p->mAngleY=p->mPrevAngleY=static_cast<short>(angle);p->mHorzSpeed=0;p->mVertSpeed=0;
     return 1;
 }
-extern "C" void sm64ds_test_game_start_file(int level){
+// StartFile chooses the visible areas from the retail entrance. Enter the
+// checkpoint's area before restoring a position beyond an internal door.
+static unsigned char checkpoint_entrance(int level,int area){
+    if(level<0||level>=52||area<=0||area>7)return 0;
+    const auto* root=data_02092208[level];
+    if(!root)return 0;
+    const LVL_Overlay::ObjTable* table=nullptr;
+    std::memcpy(&table,root+4,sizeof table);
+    if(!table||!table->entries)return 0;
+    const auto* groups=static_cast<const LVL_Overlay::ObjSubTable*>(table->entries);
+    for(unsigned i=0;i<table->count;++i){
+        if(groups[i].unk_000!=1||!groups[i].entries)continue;
+        const auto* entrances=static_cast<const LVL_Overlay::StandardEntry*>(groups[i].entries);
+        for(unsigned j=0;j<groups[i].count;++j)
+            if((entrances[j].param&7)==area)return static_cast<unsigned char>(j);
+    }
+    return 0;
+}
+extern "C" void sm64ds_test_game_start_file(int level,int area){
     // As the verified benchmark: mark only the opening as seen, no save write.
     SaveData::SetCharacterIntro(7);
-    StartFile(static_cast<signed char>(level),0);
+    StartFile(static_cast<signed char>(level),checkpoint_entrance(level,area));
 }
 extern "C" unsigned sm64ds_test_game_actors(Sm64dsTestActor* out,unsigned capacity){
     unsigned total=0;

@@ -244,6 +244,50 @@ bool save_file(const char* path, const Settings& s) {
     if (n <= 0 || n >= int(sizeof buf)) return false;
     return integrated_storage::replace_file(path, buf, size_t(n));
 }
+#ifdef __3DS__
+namespace {
+struct SettingsWriter {
+    LightLock lock; LightEvent wake; Thread thread = nullptr; bool ready = false, failed = false;
+    char path[128] = {}; Settings pending{}; unsigned generation = 0, written = 0;
+};
+SettingsWriter g_writer;
+void settings_writer_main(void*) {
+    for (;;) {
+        LightEvent_Wait(&g_writer.wake);
+        for (;;) {
+            char path[128]; Settings copy;
+            LightLock_Lock(&g_writer.lock);
+            const unsigned generation = g_writer.generation;
+            if (generation == g_writer.written) { LightLock_Unlock(&g_writer.lock); break; }
+            std::memcpy(path, g_writer.path, sizeof path); copy = g_writer.pending;
+            LightLock_Unlock(&g_writer.lock);
+            const bool ok = save_file(path, copy);
+            std::printf("Settings saved in the background=%u\n", unsigned(ok));
+            LightLock_Lock(&g_writer.lock); g_writer.written = generation; LightLock_Unlock(&g_writer.lock);
+        }
+    }
+}
+}
+bool save_file_async(const char* path, const Settings& s) {
+    if (!path || std::strlen(path) >= sizeof g_writer.path) return false;
+    if (!g_writer.ready) { LightLock_Init(&g_writer.lock); LightEvent_Init(&g_writer.wake, RESET_ONESHOT); g_writer.ready = true; }
+    if (!g_writer.thread && !g_writer.failed) {
+        // BUILD142 New 3DS profile: SD writes on core 1, off the game's core.
+        bool is_new = false; APT_CheckNew3DS(&is_new);
+        if (is_new) g_writer.thread = threadCreate(settings_writer_main, nullptr, 16 * 1024, 0x31, 1, true);
+        if (!g_writer.thread) g_writer.thread = threadCreate(settings_writer_main, nullptr, 16 * 1024, 0x31, -2, true);
+        if (!g_writer.thread) g_writer.failed = true;
+    }
+    if (!g_writer.thread) return save_file(path, s);
+    LightLock_Lock(&g_writer.lock);
+    std::strcpy(g_writer.path, path); g_writer.pending = s; ++g_writer.generation;
+    LightLock_Unlock(&g_writer.lock);
+    LightEvent_Signal(&g_writer.wake);
+    return true;
+}
+#else
+bool save_file_async(const char* path, const Settings& s) { return save_file(path, s); }
+#endif
 
 namespace {
 Live g_live;

@@ -140,11 +140,12 @@ Error MenuBackdropState::emit(Screen main,SubmitBackground sink,void* user,bool 
         const auto screen=e==0?main:(main==Screen::top?Screen::bottom:Screen::top);
         for(unsigned n=0;n<windows.count;++n){const auto& w=windows.window[n];const auto& b=part->bounds;
             if(w.right<=w.x+b.left||w.left>=w.x+b.right||w.bottom<=w.y+b.top||w.top>=w.y+b.bottom)continue;
-            CanvasPlacement placement;error=canvas_placement(crop,w,screen,{screen==Screen::top?40.f:0,0,320,240},placement);if(error!=Error::none)return error;
+            const bool castle=layout_==3&&screen==Screen::top;
+            CanvasPlacement placement;error=canvas_placement(crop,w,screen,{screen==Screen::top&&!castle?40.f:0,0,castle?400.f:320.f,240},placement);if(error!=Error::none)return error;
             auto& layer=layers[count++];layer.source=LayerSource::canvas;layer.bank_id=v->bank;layer.part=part->part;layer.screen=screen;
             layer.order=std::uint16_t((3-c.priority)*1024+(3-c.layer)*128);layer.rectangle=placement.rectangle;layer.clip=placement.clip;layer.material.blend=Blend::alpha;
             layer.tone_target=std::uint8_t(1u<<c.layer);
-            if(screen==Screen::top&&part->repeat_edges){
+            if(!castle&&screen==Screen::top&&part->repeat_edges){
                 const auto base=layer;
                 for(const int shift:{-320,320}){const int left=std::max(0,int(base.clip.left)+shift),right=std::min(400,int(base.clip.right)+shift);
                     if(left>=right)continue;

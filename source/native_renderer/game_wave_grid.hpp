@@ -40,13 +40,30 @@ inline Error wave_grid(const WaveGrid& g,NormalVertex* out,std::size_t capacity,
         result.z=std::int16_t(signed10(int(floor_shift(n[2],3))));result.uv_source=2;
         return result;
     };
+    // BUILD137: a grid point's stagger depends only on its own row parity
+    // (row r uses du/2 when r is odd, both as the top and as the bottom of a
+    // strip), so each point is converted once into a row cache instead of up
+    // to six times. Same vertex() per point, so the output is bit-identical.
+    // The file selector draws this grid twice per update on the game thread
+    // (4.3 ms per update in Azahar New 3DS at 50% clock, BUILD 137 probe).
+    // Game thread only: the two row caches are static.
+    static NormalVertex rows_cache[2][256];
+    auto convert_row=[&](unsigned row,NormalVertex* into){
+        const std::int32_t stagger=(row&1)?g.du/2:0;
+        for(unsigned column=0;column<=g.columns;++column)into[column]=vertex(row,column,stagger);
+    };
+    NormalVertex* top=rows_cache[0];NormalVertex* bottom=rows_cache[1];
+    convert_row(0,top);
     std::size_t at=0;
-    for(unsigned row=0;row<g.rows;++row)for(unsigned j=0;j<g.columns;++j){
-        const unsigned a=(row&1)?g.columns-j:j,b=(row&1)?a-1:a+1;
-        const auto t0=vertex(row,a,(row&1)?g.du/2:0),t1=vertex(row,b,(row&1)?g.du/2:0);
-        const auto b0=vertex(row+1,a,(row&1)?0:g.du/2),b1=vertex(row+1,b,(row&1)?0:g.du/2);
-        out[at++]=t0;out[at++]=b0;out[at++]=t1;
-        out[at++]=t1;out[at++]=b0;out[at++]=b1;
+    for(unsigned row=0;row<g.rows;++row){
+        convert_row(row+1,bottom);
+        for(unsigned j=0;j<g.columns;++j){
+            const unsigned a=(row&1)?g.columns-j:j,b=(row&1)?a-1:a+1;
+            const auto& t0=top[a];const auto& t1=top[b];const auto& b0=bottom[a];const auto& b1=bottom[b];
+            out[at++]=t0;out[at++]=b0;out[at++]=t1;
+            out[at++]=t1;out[at++]=b0;out[at++]=b1;
+        }
+        auto* next=top;top=bottom;bottom=next;
     }
     written=count;return Error::none;
 }

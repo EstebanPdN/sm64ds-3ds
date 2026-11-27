@@ -111,7 +111,7 @@ def main():
     parser.add_argument('--cxi',type=Path,help='The exact NCCH content of --cia, with the integrated Old profile')
     parser.add_argument('--dsp-firmware',type=Path,default=Path.home()/'Library/Application Support/Azahar/sdmc/3ds/dspfirm.cdc')
     parser.add_argument('--prepare-only',action='store_true')
-    parser.add_argument('--native-diagnostics',action='store_true',help='Record timing and one initial-title RAM capture; L+R+A or Developer dumps process memory')
+    parser.add_argument('--native-diagnostics',action='store_true',help='Record timing and one initial-title RAM capture; L+R+A captures graphics and Developer dumps process memory')
     parser.add_argument('--capture-hitches',action='store_true',help='Diagnostic-only: at most two automatic RAM/render captures after sustained slow gameplay handoffs')
     parser.add_argument('--benchmark-profile',choices=['castle-yoshi','bob-mario','whomp-luigi','bay-wario','clock-wario'],help='Diagnostic-only original-game scenario, three complete RAM captures; implies diagnostics')
     parser.add_argument('--silent',action='store_true',help='Mute this isolated emulator profile while preserving game audio execution')

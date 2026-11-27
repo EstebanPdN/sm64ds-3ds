@@ -12,6 +12,10 @@ from pathlib import Path
 import statistics
 import struct
 import re
+import sys
+try:from vm_packed import expand_packed
+except ImportError:
+    sys.path.insert(0,str(Path(__file__).resolve().parent));from vm_packed import expand_packed
 
 HEADER=struct.Struct('<8sIIIIQQIIIIII')
 REGION=struct.Struct('<6I')
@@ -98,7 +102,9 @@ def find_dumps(game_directory):
 
 class VM:
     def __init__(self,path):
-        self.path=Path(path);self.raw=self.path.read_bytes();self.regions=[]
+        # Packed SM64VMZ1 (BUILD140+) is expanded to its SM64VM1 bytes here, so
+        # raw, VM_sha256 and every read are the same for both formats.
+        self.path=Path(path);self.raw,self.packed=expand_packed(self.path.read_bytes());self.regions=[]
         values=HEADER.unpack_from(self.raw)
         magic,version,size,word,region_size,begin,end,scene,epoch,count,complete,scan_end,devices=values
         assert magic==b'SM64VM1\0' and version in (1,2) and (size,word,region_size)==(64,4,24)
@@ -205,7 +211,7 @@ def capture_media_report(vm,path,metadata):
         return dict(available=False,reason='Legacy v1 has no LCD/VRAM contract')
     vram=vm.vram()
     assert vram is not None and len(vram)==0x600000,'Incomplete VRAM: both 3 MiB banks are required'
-    lcd=LCD(Path(path).with_suffix('.lcd'))
+    lcd=LCD(dump_files(path)['lcd'])  # lcd.bin beside memory.vm, or legacy <stem>.lcd
     assert metadata.get('physical_lcd') is True,'Capture did not report successful LCD acquisition'
     assert lcd.header['scene']==vm.header['scene'] and lcd.header['epoch']==vm.header['epoch'],'LCD/VM context mismatch'
     assert vm.header['begin_tick']<=lcd.header['tick']<=vm.header['end_tick'],'LCD is outside VM capture interval'
@@ -255,7 +261,7 @@ def inspect(path,elf,rom=None):
     vm=VM(path);meta_path=dump_files(path)['anchors'];meta=json.loads(meta_path.read_text())
     assert meta['epoch']==vm.header['epoch'] and meta['scene']==vm.header['scene'] and meta['worker_drained']
     anchors=meta['anchors']
-    result=dict(status='mapped_native_process_capture_validated',header=vm.header,
+    result=dict(status='mapped_native_process_capture_validated',header=vm.header,packed=vm.packed,
                 VM_sha256=hashlib.sha256(vm.raw).hexdigest(),ELF_sha256=hashlib.sha256(elf.read_bytes()).hexdigest(),
                 anchors=anchors,regions=vm.regions,captured_bytes=sum(r['payload_bytes'] for r in vm.regions),
                 physical_FCRAM_dump=False,RAM_modified=False,GPU_OS_DSP_atomic=False,
@@ -294,9 +300,17 @@ def inspect(path,elf,rom=None):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('snapshot',type=Path)
-    parser.add_argument('--elf',type=Path,required=True);parser.add_argument('--arm9',type=Path)
+    parser.add_argument('--elf',type=Path,help='ELF of the BUILD that wrote the snapshot (required unless --expand)')
+    parser.add_argument('--arm9',type=Path)
     parser.add_argument('--export',type=Path,help='Write LCD PNGs, LCD/GPU register JSON and vram.bin here')
-    args=parser.parse_args();result=inspect(args.snapshot,args.elf,args.arm9)
+    parser.add_argument('--expand',type=Path,metavar='OUT',help='Write the validated SM64VM1 bytes (a packed SM64VMZ1 file expanded) to OUT and stop')
+    args=parser.parse_args()
+    if args.expand:
+        vm=VM(args.snapshot);args.expand.write_bytes(vm.raw)
+        print(json.dumps(dict(expanded=str(args.expand),bytes=len(vm.raw),VM_sha256=hashlib.sha256(vm.raw).hexdigest(),packed=vm.packed),indent=2))
+        return
+    if not args.elf:parser.error('--elf is required')
+    result=inspect(args.snapshot,args.elf,args.arm9)
     if args.export:
         args.export.mkdir(parents=True,exist_ok=True)
         lcd=dump_files(args.snapshot)['lcd']

@@ -29,6 +29,9 @@ public:
     Error preload_model_images(std::uint32_t file_id) noexcept;
     Error preload_image_bank(std::uint32_t bank_id) noexcept;
     Error preload_canvas(std::uint32_t bank_id) noexcept;
+    // BUILD140: runs the queued look-ahead now, outside any frame, for `scene`
+    // (adopted). Only while no render job runs (boot, or worker drained).
+    Error warm(std::uint64_t scene) noexcept;
     // Matrices already include the selected LCD's aspect/orientation. The
     // renderer never rescales/transforms static vertices on the CPU.
     Error draw(const SceneView& scene) noexcept {return draw(scene,scene.scene_screen);}
@@ -36,7 +39,9 @@ public:
     // BUILD134: the exact second image of an interpolated pair, built while
     // the GPU draws the first one (Citro3DBackend::begin_overlapped) and
     // shown on the following LCD refresh (fence) or as soon as it is drawn.
-    bool second_available() noexcept {return backend_.overlap_available();}
+    bool second_available() noexcept {return !gfxIs3D()&&osGet3DSliderState()<=0.f&&backend_.overlap_available();}
+    bool second_tail() const noexcept {return backend_.second_tail();}
+    void clear_second_tail() noexcept {backend_.clear_second_tail();}
     Error draw_second(const SceneView&,Screen output,bool fence,int raised_priority,int normal_priority) noexcept;
     struct InterfacePublication {InterfaceImage image{};std::uint32_t revision=0;};
     // Two borrowed publications, uploaded inside the scene's single GPU frame.
@@ -52,6 +57,7 @@ public:
     void set_lenient(bool value) noexcept {lenient_=value;}
     void set_pace(bool value) noexcept {pace_=value;}
     void set_late_pace(bool value) noexcept {backend_.set_late_fence(value);}
+    void set_lock_priority(int raised) noexcept {backend_.set_lock_priority(raised);}
     void screen_tone(int top,int bottom) noexcept {screen_tone_={top,bottom};}
     void geometry_tone(int amount) noexcept {geometry_tone_=amount;}
     // Wait until all queued GPU work has completed (diagnostic captures).
@@ -138,9 +144,10 @@ private:
     Metrics metrics_{};
     enum class PreloadKind {model,model_images,image_bank,canvas};
     struct Preload {std::uint32_t id;PreloadKind kind;};
-    std::array<Preload,8> preload_{};
+    std::array<Preload,16> preload_{}; // the title warm-up queues 13
     unsigned preload_count_=0;
     Error queue_preload(std::uint32_t,PreloadKind) noexcept;
+    void run_preloads() noexcept;
     struct InterfaceResident {Texture texture{};InterfaceCrop crop{};std::uint32_t revision=0;bool visible=false;};
     std::array<InterfaceResident,2> interface_{};
     InterfaceMetrics interface_metrics_{};
@@ -162,14 +169,18 @@ private:
     std::array<bool,4> bridge_expand_{},bridge_surface_ready_{};
     // Pixels last published to bridge_base_[0..3] and map_foreground_
     // (256x192 words each, lazily allocated): band-delta uploads.
-    std::uint32_t* frame_shadow_[5]{};
+    std::uint32_t* frame_shadow_[6]{}; // BUILD141: [5] = the map's behind plane
     // BUILD134: a shadow holds published pixels only after a complete upload
     // wrote it. One allocated later than its texture (an earlier malloc
     // failed) was compared as it came from malloc: a band equal to that
     // garbage was never uploaded.
-    bool frame_shadow_valid_[5]{};
+    bool frame_shadow_valid_[6]{};
     Error upload_plane(unsigned index,const std::uint32_t* argb,Texture&,bool sharp,bool* changed=nullptr,std::uint32_t candidates=~0u) noexcept;
     Texture map_raster_{},map_surface_{},map_sharp_{},map_foreground_{};
+    // BUILD141: the map's GPU text layers (raster identity and key last
+    // uploaded) and the plane of OBJs behind them.
+    std::array<Texture,3> map_layer_{};std::array<const void*,3> map_layer_identity_{};std::array<std::uint64_t,3> map_layer_key_{};
+    Texture map_behind_{};unsigned map_layerless_=0;std::uint64_t map_uploaded_serial_=0;
     Mesh map_quad_{};
     // Fog experiment: the PICA table of the last fog seen, rebuilt on change.
     DsFog fog_source_{};FogDepth fog_depth_{};std::array<float,256> fog_table_{};bool fog_table_valid_=false;
@@ -190,6 +201,7 @@ private:
     bool map_drawn_=false,map_dirty_=true;
     AffineImage map_drawn_image_{};
     Error initialize_map_surfaces() noexcept;
+    bool release_bridge_target() noexcept; // BUILD142: a HUD plane's VRAM for the map
     Error initialize_bridge_surfaces() noexcept;
     Error ensure_screen_quad() noexcept;
     Error upload_shadows(const SceneView&) noexcept;

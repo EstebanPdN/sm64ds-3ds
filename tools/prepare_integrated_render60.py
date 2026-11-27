@@ -7,6 +7,18 @@ import shutil
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[1]
+# lz4.c beside the game; also the viewer, which includes native_diagnostics.hpp.
+# The native-renderer checkout carries the same block (refresh_native_overlay.py).
+LZ4_CMAKE='''
+# Packed developer dumps (SM64VMZ1): LZ4 1.9.4 from third_party/lz4.
+foreach(sm64ds_lz4_target IN ITEMS smoke_player sm64ds_viewer)
+    if(TARGET ${sm64ds_lz4_target})
+        target_sources(${sm64ds_lz4_target} PRIVATE platform/3ds/lz4.c platform/3ds/graphics_report.cpp)
+        set_source_files_properties(platform/3ds/graphics_report.cpp PROPERTIES INCLUDE_DIRECTORIES "$ENV{DEVKITPRO}/portlibs/3ds/include")
+        target_link_libraries(${sm64ds_lz4_target} PRIVATE "$ENV{DEVKITPRO}/portlibs/3ds/lib/libminizip.a" "$ENV{DEVKITPRO}/portlibs/3ds/lib/libz.a")
+    endif()
+endforeach()
+'''
 
 def once(text,old,new):
     assert text.count(old)==1, 'Reviewed hook changed: '+old[:90]
@@ -112,10 +124,10 @@ def prepare(vendor,output,lock,rom_manifest=None):
     text=once(text,'require_runtime(sm64ds_menu_poll_input(),"local HID transfer");',
         'require_runtime(sm64ds_menu_poll_input(),"local HID transfer");\n'
         ' // Developer chords; L has no game function (enhance_runtime filters it).\n'
-        ' // L+R+A full dump, L+R+B partial dump without RAM, L+R+X delete dumps.\n'
+        ' // L+R+A graphics report, L+R+B partial dump without RAM, L+R+X delete dumps.\n'
         ' {const uint32_t held=hidKeysHeld(),down=hidKeysDown(),lr=KEY_L|KEY_R;\n'
         '  if((held&lr)==lr && (down&(lr|KEY_A|KEY_B|KEY_X))){\n'
-        '   if((held&KEY_A) && native_diagnostics::enabled())native_diagnostics::requested=true;\n'
+        '   if((held&KEY_A)){native_diagnostics::quick_requested=true;native_diagnostics::partial_requested=true;}\n'
         '   else if(held&KEY_B)native_diagnostics::partial_requested=true;\n'
         '   else if(held&KEY_X)native_diagnostics::delete_requested=true;\n'
         '  }}')
@@ -132,7 +144,7 @@ def prepare(vendor,output,lock,rom_manifest=None):
         '   unsigned(ntr::io_read(0x0400006c,2)),unsigned(ntr::io_read(0x0400106c,2)),\n'
         '   unsigned(ntr::io_read(0x04000350,4)),unsigned(ntr::io_read(0x05000000,2)),unsigned(ntr::io_read(0x05000400,2)));\n'
         ' }\n'
-        ' if(native_diagnostics::enabled() && current_scene==1 && frame>=900 && frame<1800){\n'
+        ' if(native_diagnostics::enabled() && current_scene==1 && frame>=900 && frame<1800 && frame%60==0){\n'
         '  const char* once="sdmc:/3ds/sm64ds/native-title-capture.once";\n'
         '  if(FILE* f=std::fopen(once,"rb")){std::fclose(f);if(std::remove(once)==0)native_diagnostics::requested=true;}\n'
         ' }')
@@ -143,7 +155,7 @@ def prepare(vendor,output,lock,rom_manifest=None):
         ' const bool benchmark_capture=native_benchmark::frame(current_scene,updates,native_diagnostics::enabled(),benchmark_new,svcGetSystemTick());\n'
         ' if(benchmark_capture)native_diagnostics::requested=true;\n'
         ' const uint32_t pause_requests=sm64ds_native_pause_take_requests();\n'
-        ' if(pause_requests&1u){const bool saved=enhance::save_file(enhance::kSettingsPath,enhance::snapshot());std::printf("Pause settings saved=%u\\n",unsigned(saved));}\n'
+        ' if(pause_requests&1u){const bool saved=enhance::save_file_async(enhance::kSettingsPath,enhance::snapshot());std::printf("Pause settings queued=%u\\n",unsigned(saved));}\n'
         ' if((pause_requests&2u) && native_diagnostics::enabled())native_diagnostics::requested=true;\n'
         ' if(pause_requests&4u)native_diagnostics::delete_requested=true;\n'
         ' if(native_diagnostics::delete_requested){\n'
@@ -163,8 +175,8 @@ def prepare(vendor,output,lock,rom_manifest=None):
         '   {"render60_interpolation",&render60::interpolation}};\n'
         '  const bool capture_ok=native_diagnostics::capture(full_dump,current_scene,updates,anchors,sizeof(anchors)/sizeof(anchors[0]));\n'
         '  const bool render_ok=capture_ok && native_diagnostics::capture_render(native_diagnostics::last_capture_stem);\n'
-        '  native_diagnostics::dump_progress(100,true,!(capture_ok && render_ok));\n'
-        '  if(benchmark_capture)native_benchmark::capture_completed(capture_ok && render_ok,svcGetSystemTick());\n'
+        '  const bool complete=graphics_report::finish(capture_ok && render_ok);native_diagnostics::dump_progress(100,true,!complete);\n'
+        '  if(benchmark_capture)native_benchmark::capture_completed(complete,svcGetSystemTick());\n'
         '  else native_benchmark::external_capture_completed(diagnostic_begin,svcGetSystemTick());\n'
         ' }')
     text='#include "render_60.hpp"\n#include "diagnostic_files.hpp"\n#include "render_diagnostic.hpp"\n#include "native_benchmark.h"\n#include "native_pause_menu.h"\n'+text
@@ -330,6 +342,14 @@ extern "C" void* __wrap_func_02043fdc(void* list){
     changed.extend(prepare_benchmark(output))
     cmake=output/'port/CMakeLists.txt'
     cmake.write_text(cmake.read_text()+'\ntarget_sources(smoke_player PRIVATE platform/3ds/intro_skip.cpp)\n')
+    # Packed developer dumps (SM64VMZ1, BUILD140): unmodified LZ4 1.9.4 next
+    # to native_diagnostics.hpp, which includes "lz4.h" from its own folder.
+    for name in ['graphics_report.cpp','graphics_report.hpp']:
+        shutil.copyfile(ROOT/'source/integrated_native/options'/name,output/'port/platform/3ds'/name)
+    for name in ['lz4.c','lz4.h']:
+        shutil.copyfile(ROOT/'third_party/lz4'/name,output/'port/platform/3ds'/name)
+        changed.append('port/platform/3ds/'+name)
+    cmake.write_text(cmake.read_text()+LZ4_CMAKE)
     changed.extend(prepare_display(output))
     from prepare_integrated_pause_scene import prepare as prepare_pause_scene
     prepare_pause_scene(output)

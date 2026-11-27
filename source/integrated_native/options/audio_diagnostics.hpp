@@ -52,6 +52,10 @@ struct Timing {
     // BUILD134: waits after the image was handed to the renderer (the game
     // thread would be parked anyway) and command batches deferred to there.
     std::atomic<uint32_t> late_wait_us{0}, late_waits{0}, deferred_batches{0};
+    // BUILD137: real underruns, counted when a buffer is added to a channel
+    // that already stopped (every queued buffer played: audible silence).
+    // queue_drained (Snapshot) misses the gaps that open during a refill.
+    std::atomic<uint32_t> underruns{0};
 };
 inline Timing timing;
 // ARM11 system ticks (268.111856 MHz) to microseconds: x * 3911 / 2^20.

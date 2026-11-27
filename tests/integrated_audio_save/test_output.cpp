@@ -25,6 +25,8 @@ void ndspChnWaveBufAdd(int, ndspWaveBuf* b) {
     b->status = 1; queue.push_back(b);
 }
 void ndspChnWaveBufClear(int) { queue.clear(); }
+// BUILD137 underrun counter: the fake channel plays while it holds a buffer.
+bool ndspChnIsPlaying(int) { return !queue.empty(); }
 void* linearAlloc(size_t n) { allocated = true; return std::malloc(n); }
 void linearFree(void* p) { assert(joined && allocated); std::free(p); allocated = false; }
 void DSP_FlushDataCache(void*, size_t) {}
@@ -52,18 +54,22 @@ int main() {
     Sm64dsSoundOutput output;
     auto settings = enhance::Settings::safe(); settings.developer_overlay = true; enhance::publish(settings);
     assert(output.open(service)); assert(!output.open(service));
-    assert(output.pump()); assert(rendered_frames == 1536 && queue.size() == 3);
+    // BUILD137: four 512-frame buffers (62.5 ms of queue).
+    assert(output.pump()); assert(rendered_frames == 2048 && queue.size() == 4);
     auto stats = enhance::audio_diagnostics::snapshot();
-    assert(stats.submitted == 3 && stats.completed == 0 && stats.queue_drains == 0);
+    assert(stats.submitted == 4 && stats.completed == 0 && stats.queue_drains == 0);
+    assert(enhance::audio_diagnostics::timing.underruns.load() == 0); // the prefill is not an underrun
     assert(queue[0]->data_pcm16[0] == 23000);
-    assert(output.pump() && rendered_frames == 1536); // DSP still owns every buffer
+    assert(output.pump() && rendered_frames == 2048); // DSP still owns every buffer
     complete(1); settings.audio_volume = 0; enhance::publish(settings);
-    assert(output.pump() && rendered_frames == 2048 && queue.size() == 3);
+    assert(output.pump() && rendered_frames == 2560 && queue.size() == 4);
+    assert(enhance::audio_diagnostics::timing.underruns.load() == 0); // the channel was still playing
     assert(queue.back()->data_pcm16[0] >= 22820 && queue.back()->data_pcm16[0] < 23000);
     assert(queue.back()->data_pcm16[254] == 0 && queue.back()->data_pcm16[1023] == 0);
     stats = enhance::audio_diagnostics::snapshot(); assert(stats.queue_drains == 0 && stats.completed == 1);
-    complete(3); assert(output.pump());
-    stats = enhance::audio_diagnostics::snapshot(); assert(stats.queue_drains == 1 && stats.completed == 4);
+    complete(4); assert(output.pump());
+    stats = enhance::audio_diagnostics::snapshot(); assert(stats.queue_drains == 1 && stats.completed == 5);
+    assert(enhance::audio_diagnostics::timing.underruns.load() == 1); // the channel had stopped: a real gap
     complete(1); settings.audio_volume = 200; enhance::publish(settings);
     assert(output.pump());
     stats = enhance::audio_diagnostics::snapshot();
@@ -74,12 +80,13 @@ int main() {
     assert(joined && !allocated && exits == 1 && !output.pump());
     render_ok = true; settings.developer_overlay = false; enhance::publish(settings);
     assert(output.open(service)); assert(output.pump());
-    stats = enhance::audio_diagnostics::snapshot(); assert(stats.queue_drains == 0 && stats.submitted == 3);
+    stats = enhance::audio_diagnostics::snapshot(); assert(stats.queue_drains == 0 && stats.submitted == 4);
     assert(stats.detailed_enabled == 0 && stats.clipped_samples == 0 && stats.peak_input == 0);
     assert(queue[0]->data_pcm16[0] == 32767); // saturation still applied without detailed counters
     complete(1); complete_during_render = true; assert(output.pump());
     stats = enhance::audio_diagnostics::snapshot();
-    assert(stats.completed == 2 && stats.submitted == 5 && queue.size() == 3);
+    assert(stats.completed == 2 && stats.submitted == 6 && queue.size() == 4);
+    assert(enhance::audio_diagnostics::timing.underruns.load() == 1);
     output.close(); assert(exits == 2);
     std::puts("PASS generated NDSP output: ownership, <=64-frame lock holds, unchanged buffer duration, continuous volume, queue-drain evidence, clipping counters, failure shutdown and restart");
 }

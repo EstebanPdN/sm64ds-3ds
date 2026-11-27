@@ -38,7 +38,7 @@ useful source references, with their own targets and limits.
 - [Design](NATIVE-RENDERER.md), [assets](NATIVE-ASSETS.md), [model producers](NATIVE-MODEL-PRODUCERS.md), [compositor](NATIVE-COMPOSITOR.md), [display state](NATIVE-DISPLAY-STATE.md).
 - [Component capture](NATIVE-COMPONENT-CAPTURE.md), [interface](NATIVE-INTERFACE.md), [menu 2D](NATIVE-MENU-2D.md), [backgrounds](NATIVE-BACKGROUNDS.md), [particles](NATIVE-PARTICLES.md).
 - [60 FPS budget and measurements](NATIVE_60FPS_BUDGET.md), [attribute batch prototype](NATIVE_ATTRIBUTE_BATCH_PROTOTYPE.md), [resident palette design](NATIVE_RESIDENT_PALETTE_DESIGN.md).
-- [3DS port rendering research](3DS_PORT_RENDER_RESEARCH.md), [ARMv6 audio mixer](PERF_ARMV6_MIXER_2026-11-09.md), [double-image performance study](PERFORMANCE_DOUBLE_BUILD55.md).
+- [3DS port rendering research](3DS_PORT_RENDER_RESEARCH.md), [DS and SM64DS ports research](PORTS_RESEARCH_2026-11-17.md), [ARMv6 audio mixer](PERF_ARMV6_MIXER_2026-11-09.md), [double-image performance study](PERFORMANCE_DOUBLE_BUILD55.md).
 
 These longer records contain dated observations about different binaries.
 The newer compatibility/build guides take precedence for current setup;

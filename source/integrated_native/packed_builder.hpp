@@ -95,6 +95,7 @@ inline bool publish(const boot_memory::String& part,const boot_memory::String& o
         if(!base::remove_existing(output,out))return false;
     }
     if(std::rename(part.c_str(),output.c_str())){out.error=base::system_error("Publish package",part);return false;}
+    packed_assets::verified_path(output.c_str());
     out.ok=true;out.prepared=true;out.written=1;out.root="s64:";return true;
 }
 inline Result run(const char* rom_path,const char* output_path,Callback cb,void* ctx){

@@ -54,6 +54,12 @@ void menu_display_scene_changed() noexcept;
 const SourceDisplaySnapshot& menu_display_snapshot() noexcept;
 const MenuDisplayStatistics& menu_display_statistics() noexcept;
 Error menu_display_unaffected() noexcept;
+// BUILD140: writes each engine's last known blend effect (kept here instead of
+// the DS registers while the native menu runs) to BLDCNT/BLDALPHA/BLDY. The DS
+// keeps the old scene's fade across a scene change (dScene_c::
+// ResetHardwareRegisters never writes them), so the next scene starts white
+// until its own fade-in. Game build only; called at the native-menu exit.
+void menu_display_commit_registers() noexcept;
 void menu_display_clock(std::uint64_t (*)()) noexcept;
 // Private diagnostic semantics, never full scene/physical/RAM acceptance.
 bool write_menu_display_capture(FILE*,std::uint64_t frame) noexcept;

@@ -23,8 +23,16 @@ struct DumpSurface {
     }
 };
 inline uint64_t dump_paint_tick=0;
+inline bool dump_progress_quick=false;
 inline bool dump_progress_full=true; // subtitle of the current capture
+}
+// BUILD139: every progress step tells the hang watchdog the dump is alive,
+// so a long dump (90 MB of RAM can take a minute on the SD) is not reported;
+// one that stops progressing still is, 60 s after its last step.
+extern "C" void sm64ds_watchdog_report_progress() __attribute__((weak));
+namespace native_diagnostics {
 inline void dump_progress(unsigned percent,bool force=false,bool failed=false){
+    if(sm64ds_watchdog_report_progress)sm64ds_watchdog_report_progress();
     const auto now=svcGetSystemTick();
     if(!force&&now-dump_paint_tick<SYSCLOCK_ARM11/4)return;
     dump_paint_tick=now;
@@ -35,7 +43,7 @@ inline void dump_progress(unsigned percent,bool force=false,bool failed=false){
         unsigned r=80+unsigned(y)*40/239,g=110+unsigned(y)*110/239,b=255;
         surface.pixel(x,y,0xff000000|r<<16|g<<8|b);
     }
-    native_lower::dump(surface,percent,failed,dump_progress_full);
+    native_lower::dump(surface,percent,failed,dump_progress_full,dump_progress_quick);
     GSPGPU_FlushDataCache(pixels,size_t(w)*h*surface.stride());
     gfxScreenSwapBuffers(GFX_BOTTOM,false);
 }

@@ -8,6 +8,7 @@ void _ZN8SaveData17SetCharacterIntroEi(int);
 }
 namespace { enhance::IntroSkip opening; }
 extern "C" void sm64ds_intro_skip_begin(){opening.begin();}
+extern "C" bool sm64ds_opening_map(){return opening.active&&data_0209fc48;}
 extern "C" bool sm64ds_intro_skip_hint(){return opening.active&&opening.hint;}
 extern "C" bool sm64ds_intro_skip_input(bool held,bool pressed){
  if(!opening.active)return false;

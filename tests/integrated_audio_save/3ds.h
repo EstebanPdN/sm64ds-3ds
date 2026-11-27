@@ -18,6 +18,7 @@ void ndspChnSetRate(int, float);
 void ndspChnSetFormat(int, int);
 void ndspChnSetMix(int, float*);
 void ndspChnWaveBufAdd(int, ndspWaveBuf*);
+bool ndspChnIsPlaying(int);
 void ndspChnWaveBufClear(int);
 void* linearAlloc(size_t);
 void linearFree(void*);

@@ -37,6 +37,12 @@ struct Rng {
 };
 
 unsigned sequence_id=0,step_id=0;const char* phase_name="";
+// BUILD140 (HARNESS_GPU_ALPHA=1): the candidate keeps blended texels
+// translucent for the GPU. Pictures are compared with the GPU blend applied
+// and a tolerance (the DS blends in 6 bits, the PICA in 8); raw buffers and
+// overlay planes legitimately differ there and are not compared.
+bool gpu_mode=false;unsigned long long gpu_blended=0;unsigned gpu_worst=0;
+constexpr unsigned kGpuTolerance=8;
 [[noreturn]] void fail(const char* what,long detail=-1){
     std::fprintf(stderr,"MISMATCH phase=%s sequence=%u step=%u: %s (%ld)\n",phase_name,sequence_id,step_id,what,detail);
     std::exit(1);
@@ -119,7 +125,13 @@ void picture(const HarnessLayer& l,const uint32_t* foreground,uint32_t* out,unsi
         uint32_t pixel=0;
         if(unsigned(sx)<unsigned(l.width)&&unsigned(sy)<unsigned(l.height))pixel=l.raster[unsigned(sy)*l.width+unsigned(sx)];
         if(!(pixel>>24))pixel=l.backdrop;
-        if(foreground[y*W+x]>>24)pixel=foreground[y*W+x];
+        const uint32_t front=foreground[y*W+x];const unsigned a=front>>24;
+        if(a==255u)pixel=front;
+        else if(a){ // GPU: SRC_ALPHA, ONE_MINUS_SRC_ALPHA over the map
+            uint32_t mixed=0xff000000u;
+            for(unsigned shift=0;shift<24;shift+=8){const unsigned f=(front>>shift)&255u,b=(pixel>>shift)&255u;mixed|=((f*a+b*(255u-a)+127u)/255u)<<shift;}
+            pixel=mixed;++gpu_blended;
+        }
         out[y*W+x]=master_brightness(pixel,master);
     }
 }
@@ -129,6 +141,11 @@ constexpr uint32_t B=0x04001000,B_PLTT=0x05000400,B_BG=0x06200000,B_OBJ=0x066000
 constexpr uint32_t A=0x04000000,A_PLTT=0x05000000,A_BG=0x06000000,A_OBJ=0x06400000,A_OAM=0x07000000;
 std::vector<uint8_t> saved[8]; // memory at the start of the sequence (for reverts)
 
+// Engine B BLDALPHA. In gpu_mode, often EVA+EVB=16 (the blends the GPU takes).
+unsigned bld_alpha(Rng& r){
+    if(gpu_mode&&r.chance(60)){const unsigned a=r.below(17);return a|((16u-a)<<8);}
+    return r.below(17)|(r.below(17)<<8);
+}
 void fill(Rng& r,uint32_t address,size_t bytes,unsigned zero_one_in){
     uint8_t* p=mem(address);
     for(size_t i=0;i<bytes;++i)p[i]=(zero_one_in && !r.below(zero_one_in))?0:uint8_t(r.next());
@@ -201,10 +218,10 @@ void setup_b(Rng& r,Scenario& sc){
     if(r.chance(45)){
         const unsigned mode=r.chance(85)?1:r.range(2,3);
         blend=(mode<<6)|(r.chance(70)?0x0800u:0u)|(r.chance(50)?0x2000u:0u);
-        if(r.chance(8))blend|=1u<<r.below(6);
+        if(r.chance(gpu_mode?50:8))blend|=1u<<r.below(6);
         if(r.chance(5))blend|=0x100u<<r.below(5);
     }
-    w16(B+0x50,blend);w16(B+0x52,r.below(17)|(r.below(17)<<8));w16(B+0x54,r.below(17));
+    w16(B+0x50,blend);w16(B+0x52,bld_alpha(r));w16(B+0x54,r.below(17));
     w16(B+0x6c,r.chance(90)?0:(r.below(17)|(r.range(1,2)<<14)));
     w8(0x04000248,r.chance(90)?0x82:r.below(256));w8(0x04000249,r.chance(90)?0x83:r.below(256));
     fill(r,B_PLTT,0x400,0);fill(r,0x06898000,0x8000,0);fill(r,0x068a0000,0x2000,0);
@@ -343,7 +360,7 @@ const char* mutate_b(Rng& r,Scenario& sc,const Weights& w,bool& unused_tile){
     if(pick<w.registers){
         switch(r.below(12)){
         case 0:w16(B+0x50,r16(B+0x50)^(1u<<r.below(14)));return "BLDCNT";
-        case 1:w16(B+0x52,r.below(17)|(r.below(17)<<8));return "BLDALPHA";
+        case 1:w16(B+0x52,bld_alpha(r));return "BLDALPHA";
         case 2:w16(B+0x54,r.below(17));return "BLDY";
         case 3:w16(B+0x6c,r.chance(60)?0:(r.below(17)|(r.range(1,2)<<14)));return "MASTER_BRIGHT";
         case 4:w32(B,r32(B)^(r.chance(50)?0x100u:0x200u));return "DISPCNT overlay";
@@ -397,7 +414,7 @@ const char* mutate_a(Rng& r,Scenario& sc){
 // ---- comparison steps -------------------------------------------------------
 struct Totals {
     unsigned long long steps=0,native_true=0,native_false=0,foreground_bytes=0,raster_bytes=0,plane_bytes=0,
-        unnamed_tile_hits=0,idle_steps=0,descriptor_differences=0,return_differences=0,candidate_later=0,pictures_not_compared=0;
+        unnamed_tile_hits=0,forgotten_buffers=0,idle_steps=0,descriptor_differences=0,return_differences=0,candidate_later=0,pictures_not_compared=0;
 } totals;
 
 void compare_candidates(int engine,bool strict){
@@ -413,6 +430,7 @@ void compare_candidates(int engine,bool strict){
 }
 // One update of the bottom-screen map as present_playable prepares it.
 void step_b(unsigned buffer,bool strict,bool idle,bool unnamed_tile){
+    if(gpu_mode)strict=false; // pictures only (see gpu_mode)
     HarnessLayer layer[2];int ok[2];
     unsigned long long before[8]{};
     if(sides[1].api->stats)std::memcpy(before,sides[1].api->stats,sizeof before);
@@ -434,10 +452,15 @@ void step_b(unsigned buffer,bool strict,bool idle,bool unnamed_tile){
             same_bytes(sides[0].foreground[b],sides[1].foreground[b],PIXELS*4,"foreground buffer");totals.foreground_bytes+=PIXELS*4ull;
             const uint32_t* base[2];uint64_t generation[2];uint32_t bands[2];
             for(unsigned s=0;s<2;++s)bands[s]=sides[s].api->bands(sides[s].foreground[b],&base[s],&generation[s]);
-            if(bands[0]!=bands[1])fail("foreground bands",long(bands[1]));
-            if(generation[0]!=generation[1])fail("foreground base generation");
-            if(sides[0].bases.id(base[0])!=sides[1].bases.id(base[1]))fail("foreground base identity");
-            if(base[0])same_bytes(base[0],base[1],PIXELS*4,"foreground base plane");
+            // ~0u: the side keeps no record of this buffer (BUILD 133 kept two
+            // targets, BUILD141 four), so every band is a candidate: any mask
+            // of a side that still knows the buffer is as safe.
+            if(bands[0]!=~0u && bands[1]!=~0u){
+                if(bands[0]!=bands[1])fail("foreground bands",long(bands[1]));
+                if(generation[0]!=generation[1])fail("foreground base generation");
+                if(sides[0].bases.id(base[0])!=sides[1].bases.id(base[1]))fail("foreground base identity");
+                if(base[0])same_bytes(base[0],base[1],PIXELS*4,"foreground base plane");
+            }else if(bands[0]!=bands[1])++totals.forgotten_buffers;
         }
         if(sides[1].api->stats && unnamed_tile && ok[1] && sides[1].api->stats[1]>before[1])++totals.unnamed_tile_hits;
     }else{
@@ -457,13 +480,19 @@ void step_b(unsigned buffer,bool strict,bool idle,bool unnamed_tile){
         }
         if(ok[0] && ok[1]){
             for(unsigned s=0;s<2;++s)picture(layer[s],sides[s].foreground[buffer],image[s],r16(B+0x6c));
-            if(std::memcmp(image[0],image[1],sizeof image[0])){
+            if(!gpu_mode&&std::memcmp(image[0],image[1],sizeof image[0])){
                 unsigned count=0,first=PIXELS;
                 for(unsigned i=0;i<PIXELS;++i)if(image[0][i]!=image[1][i]){if(first==PIXELS)first=i;++count;}
                 std::fprintf(stderr,"picture: DISPCNT=%08x BLDCNT=%04x BLDALPHA=%04x BG3CNT=%04x MASTER_BRIGHT=%04x VRAMCNT_H/I=%02x/%02x pixels=%u first=%u,%u reference=%08x candidate=%08x\n",
                     r32(B),r16(B+0x50),r16(B+0x52),r16(B+14),r16(B+0x6c),*mem(0x04000248),*mem(0x04000249),count,first%W,first/W,image[0][first],image[1][first]);
             }
-            same_bytes(image[0],image[1],sizeof image[0],differs?"picture (publication against the other build's next publication)":"picture");
+            if(gpu_mode){
+                for(unsigned i=0;i<PIXELS;++i)for(unsigned shift=0;shift<24;shift+=8){
+                    const unsigned p0=(image[0][i]>>shift)&255u,p1=(image[1][i]>>shift)&255u,d=p0>p1?p0-p1:p1-p0;
+                    gpu_worst=std::max(gpu_worst,d);
+                    if(d>kGpuTolerance){std::fprintf(stderr,"GPU picture pixel %u,%u reference=%08x candidate=%08x\n",i%W,i/W,image[0][i],image[1][i]);fail("GPU-blended picture",long(d));}
+                }
+            }else same_bytes(image[0],image[1],sizeof image[0],differs?"picture (publication against the other build's next publication)":"picture");
             totals.foreground_bytes+=PIXELS*4ull;
         }else if(!ok[0] && !ok[1]){
             // Both show the CPU composition. Its per-sprite OBJ layer keeps
@@ -523,7 +552,7 @@ void run_b(uint64_t seed,unsigned sequences,unsigned steps,bool disturbed){
                 std::memcpy(mem(B),registers,sizeof registers);
                 if(r.chance(50)){bool unnamed_now=false;const Weights tiles{0,0,0,1,0,0,0,0,0};mutate_b(r,scenario_b,tiles,unnamed_now);}
             }
-            else if(!disturbed && r.chance(4))compare_candidates(1,true); // the CPU candidates of the same frame
+            else if(!disturbed && !gpu_mode && r.chance(4))compare_candidates(1,true); // the CPU candidates of the same frame
             for(unsigned s=0;s<2;++s)sides[s].api->pin(1);
         }
     }
@@ -551,6 +580,7 @@ int main(int argc,char** argv){
     const unsigned steps=argc>2?unsigned(std::atoi(argv[2])):300;
     const uint64_t seed=argc>3?std::strtoull(argv[3],nullptr,0):20261114ull;
     for(unsigned i:{4u,5u,6u,7u}){region[i]=static_cast<uint8_t*>(std::calloc(1,region_size[i]));if(!region[i])return 2;}
+    gpu_mode=std::getenv("HARNESS_GPU_ALPHA")!=nullptr;
     sides[0].api=harness_side_reference();sides[1].api=harness_side_candidate();
     for(auto& side:sides){
         side.api->init(region);
@@ -563,6 +593,7 @@ int main(int argc,char** argv){
     run_a(seed,std::max(1u,sequences/4),steps);
     const Totals with_a=totals;
     run_b(seed^0x5555,std::max(1u,sequences/6),steps,true);
+    if(gpu_mode)std::printf("GPU alpha pictures: gpu_blended=%llu pixels within %u/255 (worst %u)\n",gpu_blended,kGpuTolerance,gpu_worst);
     std::printf("PASS: %llu engine-B publications (%llu published, %llu refused) and %llu engine-A preparations bit-identical: "
         "%llu foreground bytes, %llu map raster bytes, %llu candidate plane bytes\n",
         strict.steps,strict.native_true,strict.native_false,with_a.steps-strict.steps,

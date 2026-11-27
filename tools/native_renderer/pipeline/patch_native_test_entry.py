@@ -3,7 +3,12 @@ p=Path('port/platform/3ds/game_entry.cpp');t=p.read_text()
 old='''#ifdef SM64DS_USER_BUILD
  // Keep manual play independent of the automated probes' env.txt and saves.'''
 assert t.count(old)==1
-t=t.replace(old,'''#ifdef SM64DS_NATIVE_TEST_BUILD
+t=t.replace(old,'''#if defined(SM64DS_PUBLIC_BETA)
+ // Manual native play uses the same save as the installed native renderer.
+ setenv("SM64DS_FRESH_NATIVE","1",1);
+ setenv("SM64DS_FRESH_NATIVE_ASSETS","sdmc:/3ds/sm64ds/native",1);
+ setenv("SM64DS_SAVE_PATH","sdmc:/3ds/sm64ds/native-test.sav",1);
+#elif defined(SM64DS_NATIVE_TEST_BUILD)
  // Native-renderer test CIA: own title, save and log; prepared native assets
  // in RomFS; never reads the shared env.txt. The ROM package is shared.
  romfsInit();
@@ -16,7 +21,7 @@ t=t.replace(old,'''#ifdef SM64DS_NATIVE_TEST_BUILD
 old='''#ifdef SM64DS_USER_BUILD
  std::freopen("sdmc:/3ds/sm64ds/user-test.log","w",stdout);stderr=stdout;'''
 assert t.count(old)==1
-t=t.replace(old,'''#ifdef SM64DS_NATIVE_TEST_BUILD
+t=t.replace(old,'''#if defined(SM64DS_NATIVE_TEST_BUILD) || defined(SM64DS_PUBLIC_BETA)
  std::freopen("sdmc:/3ds/sm64ds/native-test.log","w",stdout);stderr=stdout;
 #elif defined(SM64DS_USER_BUILD)
  std::freopen("sdmc:/3ds/sm64ds/user-test.log","w",stdout);stderr=stdout;''',1)

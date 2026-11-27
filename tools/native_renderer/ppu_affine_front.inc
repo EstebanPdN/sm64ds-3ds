@@ -13,14 +13,26 @@ struct NativeAffineTarget {
     // BUILD134: serial of the OBJ inputs (NativeAffineObjInputs) this buffer's
     // sprites were last drawn from; 0 = drawn from inputs that are not keyed.
     uint64_t obj_serial=0;
+    // BUILD141: the text-layer priority the OBJs were split at (0xff: none).
+    uint8_t split=0xff;
     int16_t box[128][4];
     uint8_t priority[SCREEN_W*SCREEN_H];
 };
-NativeAffineTarget native_affine_targets[2];unsigned native_affine_clock=0;
-void native_affine_base(const uint32_t* overlay,Framebuffer& out,uint8_t* priority,int x0,int x1,int y0,int y1){
+// BUILD141: two stores, each with a foreground and a behind plane.
+NativeAffineTarget native_affine_targets[4];unsigned native_affine_clock=0;
+NativeAffineTarget& native_affine_target(const Framebuffer& buffer){
+    for(auto& t:native_affine_targets)if(t.buffer==&buffer)return t;
+    NativeAffineTarget* oldest=&native_affine_targets[0];
+    for(auto& t:native_affine_targets)if(t.age<oldest->age)oldest=&t;
+    oldest->buffer=&buffer;oldest->valid=false;return *oldest;
+}
+// BUILD140: overlay code bit 4 marks a pixel the GPU blends over the map
+// with alpha EVA/16 (gpu_alpha, see ppu_prepare_background_affine).
+void native_affine_base(const uint32_t* overlay,uint8_t gpu_alpha,Framebuffer& out,uint8_t* priority,int x0,int x1,int y0,int y1){
     for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x){const unsigned i=unsigned(y)*SCREEN_W+unsigned(x);
         const uint32_t pixel=overlay?overlay[i]:0;const unsigned code=pixel>>24;
-        out.px[y][x]=code?pixel|0xff000000u:0;priority[i]=code?uint8_t(code/32-2):4;}
+        out.px[y][x]=!code?0u:((code&16u)&&gpu_alpha)?(pixel&0xffffffu)|(uint32_t(gpu_alpha)<<24):pixel|0xff000000u;
+        priority[i]=code?uint8_t(code/32-2):4;}
 }
 // BUILD134 cost cut: native_affine_base without an overlay writes pixel 0 and
 // priority 4 everywhere.
@@ -90,18 +102,27 @@ uint64_t native_affine_obj_serial(const uint8_t* oam,uint32_t disp,unsigned blen
 // The pixel statement of a publication (one OBJ texel over the foreground),
 // held by value so its fields stay in registers across the byte stores.
 struct NativeAffinePut {
-    uint32_t* pixels;uint8_t* priority;const PpuGpuAffineLayer* layer;unsigned blend,alpha;
+    uint32_t* front_pixels;uint8_t* front_priority;const PpuGpuAffineLayer* layer;unsigned blend,alpha,obj_alpha;
+    // BUILD141: OBJs of priority > split go to the plane behind the GPU text
+    // layers (null: one plane).
+    uint32_t* behind_pixels=nullptr;uint8_t* behind_priority=nullptr;unsigned split=255;
     inline __attribute__((always_inline)) void operator()(int x,int y,uint32_t pixel,unsigned p,unsigned object_alpha) const {
         at(unsigned(y*SCREEN_W+x),x,y,pixel,p,object_alpha);
     }
     // i = y*SCREEN_W+x, which a row of texels shares up to its column.
     inline __attribute__((always_inline)) void at(unsigned i,int x,int y,uint32_t pixel,unsigned p,unsigned object_alpha) const {
+        const bool back=behind_pixels&&p>split;
+        uint32_t* const pixels=back?behind_pixels:front_pixels;uint8_t* const priority=back?behind_priority:front_priority;
         // OBJ wins a priority tie against BG; lower OAM wins OBJ ties.
         if(p<=priority[i]){
             // Only pixels actually occupied by a semi-transparent OBJ need
             // the map's integer CPU sample. Every other map texel stays GPU.
             const PpuGpuAffineLayer& map=*layer;
             if(object_alpha&&(!map.overlay||!(map.overlay[i]>>24))){
+                // BUILD140: a plain semi-transparent OBJ whose blend always
+                // happens (EVA+EVB=16, map and backdrop are second targets):
+                // the GPU blends it over the live map, no CPU map sample.
+                if(object_alpha==17u&&obj_alpha){pixels[i]=(pixel&0xffffffu)|(obj_alpha<<24);priority[i]=uint8_t(p);return;}
                 int sx=(map.ref_x+x*map.pa+y*map.pb)>>8,sy=(map.ref_y+x*map.pc+y*map.pd)>>8;
                 if(map.wrap){sx&=map.width-1;sy&=map.height-1;}
                 uint32_t behind=0;
@@ -135,6 +156,13 @@ template<bool SEMI> inline __attribute__((always_inline)) void native_affine_pla
     const int sy0=std::max(0,-y),sy1=std::min(h,SCREEN_H-y);
     const unsigned columns=unsigned(w)/8u;const uint32_t step=c256?64u:32u;
     const int direction=hflip?-1:1;
+    // BUILD142: a semi-transparent sprite the GPU blends (BUILD140) over a
+    // map without CPU overlay is written like an opaque one, with the blend
+    // alpha in place of 0xff (the pixel statement's GPU-blend branch). The
+    // opening's ~40 cloud sprites took the per-texel path: 2-3.4 ms per
+    // redraw even at New 3DS speed.
+    const bool gpu_semi=SEMI&&put.obj_alpha&&!put.layer->overlay;
+    const uint32_t alpha_bits=gpu_semi?(put.obj_alpha<<24):0xff000000u;const uint32_t colour_mask=gpu_semi?0xffffffu:0xffffffffu;
     for(int sy=sy0;sy<sy1;++sy){
         const int py=y+sy,ty=vflip?h-1-sy:sy;
         const unsigned trow=unsigned(ty)>>3,fy=unsigned(ty)&7u;
@@ -151,10 +179,13 @@ template<bool SEMI> inline __attribute__((always_inline)) void native_affine_pla
             const uint8_t* texels=vram+((row+tcol*step)&vram_mask);
             // A whole opaque tile row: the pixel statement without its blend
             // (object_alpha is 0), at constant offsets from the row's pointers.
-            const bool whole=!SEMI && low>=sx0 && low+8<=sx1;
-            uint32_t* const out=put.pixels+(whole?line+low:0);uint8_t* const front=put.priority+(whole?line+low:0);
+            const bool whole=(!SEMI||gpu_semi) && low>=sx0 && low+8<=sx1;
+            // BUILD141: one sprite has one priority, hence one plane.
+            const bool back=put.behind_pixels&&priority>put.split;
+            uint32_t* const out=(back?put.behind_pixels:put.front_pixels)+(whole?line+low:0);
+            uint8_t* const front=(back?put.behind_priority:put.front_priority)+(whole?line+low:0);
             auto opaque=[&](unsigned index,int column) __attribute__((always_inline)) {
-                if(index && priority<=front[column]){out[column]=colors[index]|0xff000000u;front[column]=uint8_t(priority);}
+                if(index && priority<=front[column]){out[column]=(colors[index]&colour_mask)|alpha_bits;front[column]=uint8_t(priority);}
             };
             if(c256){
                 const uint32_t w0=ppu_word(texels),w1=ppu_word(texels+4);
@@ -263,8 +294,12 @@ __attribute__((noinline)) void native_affine_objects(const uint8_t* oam,uint32_t
     }
 }
 }
-bool ppu_prepare_native_affine(Engine eng,Framebuffer& foreground,PpuGpuAffineLayer& layer){
+// BUILD142: cost of this preparation by part (background view, OBJ planes),
+// logged every 300 calls: the opening's map cost 3.5 ms per update.
+static struct {double view=0,objects=0;unsigned calls=0,redraws=0,sprites=0,area=0,full=0;} native_affine_cost;
+bool ppu_prepare_native_affine(Engine eng,Framebuffer& foreground,PpuGpuAffineLayer& layer,Framebuffer* behind){
     if(eng!=ENGINE_B)return false;
+    const double cost_start=prepare_clock?prepare_clock():0.0;
     sync_vram_views();
     const auto& em=kEngines[eng];const auto disp=rd32(em.reg_base);
     // Keep unsupported effects/windows on the exact existing path. This
@@ -294,21 +329,24 @@ bool ppu_prepare_native_affine(Engine eng,Framebuffer& foreground,PpuGpuAffineLa
             bitmap|=mode==3;semi|=mode==1;extended|=mode!=3 && (a0&0x2000) && (disp&0x80000000u);
         }
     }
-    native_affine_consumer=true;
+    native_affine_consumer=true;native_affine_layers=behind!=nullptr;
     auto view=ppu_prepare_background_affine(eng);
-    native_affine_consumer=false;
+    native_affine_consumer=false;native_affine_layers=false;
+    const double cost_view=prepare_clock?prepare_clock():0.0;
     if(!view||!view->gpu_affine)return false;
     const auto& map=*view->gpu_affine;
-    NativeAffineTarget* target=nullptr;
-    for(auto& t:native_affine_targets)if(t.buffer==&foreground)target=&t;
-    if(!target){
-        target=native_affine_targets[0].age<=native_affine_targets[1].age?&native_affine_targets[0]:&native_affine_targets[1];
-        target->buffer=&foreground;target->valid=false;
-    }
+    // BUILD141: GPU text layers: OBJs behind them go to the behind plane.
+    const bool layered=behind&&map.text_count;
+    const unsigned split=layered?map.text_priority:0xffu;
+    NativeAffineTarget* target=&native_affine_target(foreground);
     target->age=++native_affine_clock;
+    NativeAffineTarget* back=layered?&native_affine_target(*behind):nullptr;
+    if(back)back->age=++native_affine_clock;
+    else if(behind)for(auto& t:native_affine_targets)if(t.buffer==behind)t.valid=false; // unused this time
     uint8_t* const priority=target->priority;
     unsigned restore=0;
-    const bool same=target->valid&&target->overlay==map.overlay&&target->overlay_generation==map.overlay_generation;
+    const bool same=target->valid&&target->overlay==map.overlay&&target->overlay_generation==map.overlay_generation&&target->split==split;
+    const bool back_same=!back||(back->valid&&back->split==split);
     const unsigned alpha=rd16(em.reg_base+0x52);
     // BUILD134 cost cut: this buffer already holds these sprites over this
     // base (see NativeAffineObjInputs): nothing to restore, nothing to draw,
@@ -316,25 +354,43 @@ bool ppu_prepare_native_affine(Engine eng,Framebuffer& foreground,PpuGpuAffineLa
     const bool cuts=ppu_cost_cuts();
     // The map descriptor a blended sprite samples is immutable per generation
     // of the affine publication (a rotating map swaps descriptors).
-    const uint64_t serial=cuts?native_affine_obj_serial(oam,disp,blend,alpha,drawn,count,bitmap,semi,extended,&map,view->background_generation):0;
-    if(!(serial&&same&&target->obj_serial==serial)){
+    static const bool fast_obj=std::getenv("PPU_REFERENCE_OBJ")==nullptr;
+    // BUILD140: semi-transparent OBJs blended by the GPU no longer depend on
+    // the map's motion (no CPU sample), so the OBJ key ignores the map then.
+    const unsigned obj_eva=std::min(alpha&31u,16u),obj_evb=std::min((alpha>>8)&31u,16u);
+    const unsigned obj_alpha=cuts&&ppu_gpu_alpha()&&fast_obj&&!bitmap&&obj_eva+obj_evb==16u&&((blend>>(8+map.layer))&1u)&&(blend&0x2000u)?(obj_eva*255u+8u)/16u:0u;
+    const uint64_t serial=cuts?native_affine_obj_serial(oam,disp,blend,alpha,drawn,count,bitmap,semi&&!obj_alpha,extended,&map,view->background_generation):0;
+    if(!(serial&&same&&back_same&&target->obj_serial==serial&&(!back||back->obj_serial==serial))){
+        ++native_affine_cost.redraws;native_affine_cost.sprites+=count;
+        for(unsigned b=0;b<count;++b)native_affine_cost.area+=unsigned(boxes[b][1]-boxes[b][0])*unsigned(boxes[b][3]-boxes[b][2]);
+        if(back){
+            // Base of the behind plane: transparent (the map shows through).
+            unsigned back_restore=0;
+            if(back_same)for(unsigned b=0;b<back->boxes;++b)back_restore+=unsigned(back->box[b][1]-back->box[b][0])*unsigned(back->box[b][3]-back->box[b][2]);
+            if(!back_same||back_restore>=SCREEN_W*SCREEN_H/2)native_affine_clear(*behind,back->priority,0,SCREEN_W,0,SCREEN_H);
+            else for(unsigned b=0;b<back->boxes;++b)native_affine_clear(*behind,back->priority,back->box[b][0],back->box[b][1],back->box[b][2],back->box[b][3]);
+            back->overlay=nullptr;back->overlay_generation=0;back->valid=true;back->split=uint8_t(split);
+            back->boxes=count;std::memcpy(back->box,boxes,sizeof(boxes[0])*count);back->obj_serial=serial;
+        }
         if(same)for(unsigned b=0;b<target->boxes;++b)restore+=unsigned(target->box[b][1]-target->box[b][0])*unsigned(target->box[b][3]-target->box[b][2]);
         if(cuts&&!map.overlay){
-            if(!same||restore>=SCREEN_W*SCREEN_H/2)native_affine_clear(foreground,priority,0,SCREEN_W,0,SCREEN_H);
+            if(!same||restore>=SCREEN_W*SCREEN_H/2){native_affine_clear(foreground,priority,0,SCREEN_W,0,SCREEN_H);++native_affine_cost.full;}
             else for(unsigned b=0;b<target->boxes;++b)
                 native_affine_clear(foreground,priority,target->box[b][0],target->box[b][1],target->box[b][2],target->box[b][3]);
         }
-        else if(!same||restore>=SCREEN_W*SCREEN_H/2)native_affine_base(map.overlay,foreground,priority,0,SCREEN_W,0,SCREEN_H);
+        else if(!same||restore>=SCREEN_W*SCREEN_H/2)native_affine_base(map.overlay,map.gpu_alpha,foreground,priority,0,SCREEN_W,0,SCREEN_H);
         else for(unsigned b=0;b<target->boxes;++b)
-            native_affine_base(map.overlay,foreground,priority,target->box[b][0],target->box[b][1],target->box[b][2],target->box[b][3]);
-        target->overlay=map.overlay;target->overlay_generation=map.overlay_generation;target->valid=true;
+            native_affine_base(map.overlay,map.gpu_alpha,foreground,priority,target->box[b][0],target->box[b][1],target->box[b][2],target->box[b][3]);
+        target->overlay=map.overlay;target->overlay_generation=map.overlay_generation;target->valid=true;target->split=uint8_t(split);
         target->boxes=count;std::memcpy(target->box,boxes,sizeof(boxes[0])*count);
         target->obj_serial=serial;
-        static const bool fast_obj=std::getenv("PPU_REFERENCE_OBJ")==nullptr;
         if(cuts)PPU_CUT_COUNT(fast_obj&&!bitmap?4:5);
-        if(cuts&&fast_obj&&!bitmap)native_affine_objects(oam,disp,drawn,count,NativeAffinePut{&foreground.px[0][0],priority,&map,blend,alpha});
+        if(cuts&&fast_obj&&!bitmap)native_affine_objects(oam,disp,drawn,count,NativeAffinePut{&foreground.px[0][0],priority,&map,blend,alpha,obj_alpha,
+            back?&behind->px[0][0]:nullptr,back?back->priority:nullptr,split});
         else scan_obj(eng,[&](int x,int y,uint32_t pixel,unsigned p,unsigned object_alpha){
             const unsigned i=y*SCREEN_W+x;
+            // BUILD141 (layered: no bitmap OBJ, so this path draws plain ones only).
+            Framebuffer& plane=back&&p>split?*behind:foreground;uint8_t* priority=back&&p>split?back->priority:target->priority;
             // OBJ wins a priority tie against BG; lower OAM wins OBJ ties.
             if(p<=priority[i]){
                 // Only pixels actually occupied by a semi-transparent OBJ need
@@ -351,12 +407,17 @@ bool ppu_prepare_native_affine(Engine eng,Framebuffer& foreground,PpuGpuAffineLa
                         pixel=alpha_blend(pixel,behind,a,b);
                     }
                 }
-                foreground.px[y][x]=pixel|0xff000000u;priority[i]=uint8_t(p);
+                plane.px[y][x]=pixel|0xff000000u;priority[i]=uint8_t(p);
             }
         });
     }
     else PPU_CUT_COUNT(3);
     layer=map;layer.overlay=nullptr;layer.overlay_generation=0;
+    if(prepare_clock){auto& c=native_affine_cost;const double end=prepare_clock();
+        c.view+=cost_view-cost_start;c.objects+=end-cost_view;
+        if(++c.calls>=300){std::printf("PPU native map cost (ms/call over %u): view=%.2f objects=%.2f redraws=%u sprites=%.1f area=%u full=%u layered=%u scrollHits=%u lastMiss=%08lx\n",
+            c.calls,c.view/c.calls,c.objects/c.calls,c.redraws,c.redraws?double(c.sprites)/c.redraws:0.0,c.redraws?c.area/c.redraws:0u,c.full,unsigned(layered),
+            ppu_affine_scroll_hits,(unsigned long)ppu_affine_memo_miss);c={};}}
     return true;
 }
 // BUILD129: the 8-row bands (bit n = rows 8n..8n+7) the OBJs of this
@@ -375,4 +436,23 @@ uint32_t ppu_native_affine_bands(const Framebuffer& foreground,const uint32_t** 
         *base=t.overlay;*base_generation=t.overlay_generation;return bands;
     }
     *base=nullptr;*base_generation=0;return ~0u;
+}
+// BUILD140: a held image copied another buffer's pixels into this one; its
+// overlay, boxes and OBJ serial no longer describe it.
+void ppu_native_affine_forget(const Framebuffer& foreground){
+    for(auto& t:native_affine_targets)if(t.buffer==&foreground)t.valid=false;
+}
+// BUILD142: a held image copied source's pixels into copy: copy inherits
+// source's restore state (overlay base, OBJ boxes, priorities, OBJ serial),
+// so its next preparation restores only those boxes. Forgetting it instead
+// cleared and redrew the whole plane after every held image: on the Old 3DS
+// the opening's map, held at 10 Hz, then never left its slow path.
+void ppu_native_affine_clone(const Framebuffer& copy,const Framebuffer& source){
+    const NativeAffineTarget* from=nullptr;
+    for(const auto& t:native_affine_targets)if(t.buffer==&source&&t.valid)from=&t;
+    if(!from){ppu_native_affine_forget(copy);return;}
+    static NativeAffineTarget snapshot_head;snapshot_head=*from; // the slot below may be evicted (48 KB: not on the stack)
+    NativeAffineTarget& to=native_affine_target(copy);
+    if(&to==from){to.valid=false;return;}
+    to=snapshot_head;to.buffer=&copy;to.age=++native_affine_clock;
 }

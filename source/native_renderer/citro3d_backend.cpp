@@ -1,4 +1,6 @@
+#include <array>
 #include "citro3d_backend.hpp"
+#include "hang_watchdog.hpp"
 #include "fixed_uv.hpp"
 #include "normal_uv.hpp"
 #include "native_quads.hpp"
@@ -10,6 +12,19 @@
 #include <cstdlib>
 #include <cstdio>
 #include <limits>
+extern "C" int sm64ds_gpu_unusable(void) __attribute__((weak));
+extern "C" int sm64ds_gpu_hung(void) __attribute__((weak));
+namespace {
+// BUILD137: no GX work is issued after a GX wait gave up (the GPU is hung for
+// the rest of the boot; citro3d ignores the failed wait in most callers).
+// While HOME suspended the game with this worker still running, the worker
+// waits here until the game resumes instead of abandoning a frame.
+bool gpu_usable(){
+    if(!sm64ds_gpu_unusable)return true;
+    while(sm64ds_gpu_unusable()){if(sm64ds_gpu_hung&&sm64ds_gpu_hung())return false;svcSleepThread(10000000LL);}
+    return true;
+}
+}
 
 namespace sm64ds::render {
 namespace {
@@ -190,6 +205,7 @@ bool Citro3DBackend::overlap_available() noexcept {
 }
 Error Citro3DBackend::begin_overlapped() noexcept {
     if(!ready_||state_.phase()!=FrameState::Phase::idle||!overlap_available())return reject(Error::invalid_phase);
+    if(!gpu_usable())return reject(Error::gpu_failure);
     sdk_sample_phase_=(sdk_sample_phase_+1)&7u;
     stats_ = {}; stats_.live_linear_bytes = live_-vram_; stats_.peak_linear_bytes = peak_;
     stats_.live_vram_bytes=vram_;stats_.peak_vram_bytes=peak_vram_;
@@ -208,6 +224,7 @@ Error Citro3DBackend::begin_overlapped() noexcept {
 }
 Error Citro3DBackend::end_overlapped() noexcept {
     if(!overlap_)return reject(Error::invalid_phase);
+    if(!gpu_usable()){state_.end();overlap_queue_.numEntries=0;return reject(Error::gpu_failure);}
     const bool ended=ready_&&state_.end();
     {Timed time(stats_.submit_ticks, timings_);
      u32* buffer=nullptr;u32 words=0;
@@ -217,32 +234,74 @@ Error Citro3DBackend::end_overlapped() noexcept {
     return ended?Error::none:reject(Error::invalid_phase);
 }
 void Citro3DBackend::discard_overlapped() noexcept {overlap_queue_.numEntries=0;}
+// BUILD137: hang watchdog hooks (weak: labs link the backend without it).
+extern "C" void sm64ds_watchdog_worker_stage(unsigned) __attribute__((weak));
+extern "C" void sm64ds_watchdog_gpu_stall(std::uint32_t) __attribute__((weak));
+namespace {
+void watch_stage(unsigned stage){if(sm64ds_watchdog_worker_stage)sm64ds_watchdog_worker_stage(stage);}
+// Raises the calling thread to `raised` (when it runs below it) and restores
+// its own previous priority afterwards: safe on the game and host threads too.
+struct LockPriority {
+    s32 saved=-1;
+    explicit LockPriority(int raised){
+        if(raised<0)return;s32 current=0;
+        if(R_SUCCEEDED(svcGetThreadPriority(&current,CUR_THREAD_HANDLE))&&current>raised&&
+           R_SUCCEEDED(svcSetThreadPriority(CUR_THREAD_HANDLE,raised)))saved=current;
+    }
+    ~LockPriority(){if(saved>=0)svcSetThreadPriority(CUR_THREAD_HANDLE,saved);}
+    LockPriority(const LockPriority&)=delete;LockPriority& operator=(const LockPriority&)=delete;
+};
+// A present fence waits while GSP still owns the previous swap; GSP clears it
+// at the next VBlank. At most one second (60 refreshes): a longer wait means
+// the display stopped, which the watchdog records instead of hanging here.
+void wait_present_fence(){
+    watch_stage(SM64DS_WATCH_WORKER_PRESENT_WAIT);
+    const auto start=svcGetSystemTick();
+    while(gspIsPresentPending(GSP_SCREEN_TOP)||gspIsPresentPending(GSP_SCREEN_BOTTOM)){
+        if(svcGetSystemTick()-start>SYSCLOCK_ARM11){if(sm64ds_watchdog_gpu_stall)sm64ds_watchdog_gpu_stall(1000);break;}
+        gspWaitForAnyEvent();
+    }
+}
+}
 Error Citro3DBackend::submit_overlapped(C3D_RenderTarget* target,bool fence,int raised_priority,int normal_priority) noexcept {
     if(!ready_||overlap_||state_.phase()!=FrameState::Phase::idle||!target||!target->linked)return reject(Error::invalid_phase);
+    if(!gpu_usable()){overlap_queue_.numEntries=0;return reject(Error::gpu_failure);}
     Timed time(stats_.wait_ticks, timings_);
+    // BUILD140: the tail (GPU and LCD waits) may overlap the next game
+    // update; its ends are measured at the raised priority, so the game
+    // thread cannot stretch them.
+    stats_.tail_begin_tick=svcGetSystemTick();
+    __atomic_store_n(&second_tail_,true,__ATOMIC_RELEASE);
+    const auto tail_end=[&](){stats_.tail_end_tick=svcGetSystemTick();stats_.blocked_ticks+=stats_.tail_end_tick-stats_.tail_begin_tick;};
     auto* queue=sdk_queue();
     // These waits are blocked time (the game's core stays free); the raised
     // priority only lets the few instructions between them run on time.
     if(raised_priority>=0)svcSetThreadPriority(CUR_THREAD_HANDLE,raised_priority);
-    gxCmdQueueWait(queue,-1); // first image drawn; the SDK's callback swapped it in
+    watch_stage(SM64DS_WATCH_WORKER_GPU_WAIT);
+    // A bounded wait that gave up (hung GPU): leave without touching the queue.
+    const auto give_up=[&](){overlap_queue_.numEntries=0;tail_end();if(raised_priority>=0)svcSetThreadPriority(CUR_THREAD_HANDLE,normal_priority);return reject(Error::gpu_failure);};
+    if(!gxCmdQueueWait(queue,-1))return give_up(); // first image drawn; the SDK's callback swapped it in
     if(unsigned(queue->numEntries)+overlap_queue_.numEntries+1u>queue->maxEntries){
         gxCmdQueueStop(queue);gxCmdQueueClear(queue);gxCmdQueueRun(queue);
     }
     for(unsigned i=0;i<overlap_queue_.numEntries;++i)gxCmdQueueAdd(queue,&overlap_entries_[i]);
     overlap_queue_.numEntries=0;
-    gxCmdQueueWait(queue,-1); // this image drawn into its render target
+    if(!gxCmdQueueWait(queue,-1))return give_up(); // this image drawn into its render target
     // The LCD still shows the buffer this image will be copied into until
     // the first image's swap happens: copy only after that refresh. (Checked
     // here, milliseconds after the SDK's queue callback requested that swap.)
-    if(fence)while(gspIsPresentPending(GSP_SCREEN_TOP)||gspIsPresentPending(GSP_SCREEN_BOTTOM))gspWaitForAnyEvent();
+    if(fence)wait_present_fence();
+    watch_stage(SM64DS_WATCH_WORKER_GPU_WAIT);
     C3D_FrameBufTransfer(&target->frameBuf,target->screen,target->side,target->transferFlags);
-    gxCmdQueueWait(queue,-1);
+    if(!gxCmdQueueWait(queue,-1))return give_up();
     gfxScreenSwapBuffers(target->screen,false);
+    tail_end(); // still at the raised priority
     if(raised_priority>=0)svcSetThreadPriority(CUR_THREAD_HANDLE,normal_priority);
     return Error::none;
 }
 Error Citro3DBackend::begin(bool pace) noexcept {
     if (!ready_ || state_.phase() != FrameState::Phase::idle) return reject(Error::invalid_phase);
+    if(!gpu_usable())return reject(Error::gpu_failure);
     sdk_sample_phase_=(sdk_sample_phase_+1)&7u;
     stats_ = {}; stats_.live_linear_bytes = live_-vram_; stats_.peak_linear_bytes = peak_;
     stats_.live_vram_bytes=vram_;stats_.peak_vram_bytes=peak_vram_;
@@ -255,11 +314,13 @@ Error Citro3DBackend::begin(bool pace) noexcept {
         // previous LCD swaps. Then wait only while GSP still owns those swaps.
         // SYNCDRAW always asks for a NEW VBlank at entry, discarding a refresh
         // already consumed during CPU preparation and quantizing pairs to 40Hz.
+        watch_stage(SM64DS_WATCH_WORKER_FRAME_BEGIN);
+        const auto blocked_start=svcGetSystemTick();
+        LockPriority boost(lock_priority_); // BUILD137: GX queue lock (see set_lock_priority)
         if (!C3D_FrameBegin(pace&&!present_fence_ ? C3D_FRAME_SYNCDRAW : 0)) return reject(Error::gpu_failure);
-        if(pace&&present_fence_){
-            while(gspIsPresentPending(GSP_SCREEN_TOP)||gspIsPresentPending(GSP_SCREEN_BOTTOM))
-                gspWaitForAnyEvent();
-        }
+        if(pace&&present_fence_)wait_present_fence();
+        stats_.blocked_ticks+=svcGetSystemTick()-blocked_start;
+        watch_stage(SM64DS_WATCH_WORKER_DRAW);
     }
     state_.begin();
     if(capture_.armed)capture_.base=gpuCmdBuf;
@@ -577,11 +638,21 @@ Error Citro3DBackend::upload_map_image(const std::uint32_t* image,unsigned width
         textures_.commit(slot,next);handle=slot;account(bytes);resource=textures_.get(handle);
     }
     auto* tiled=static_cast<std::uint32_t*>(resource->gpu.data);
-    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){
-        const unsigned gy=height-1-y;
-        const unsigned morton=(x&1)|((gy&1)<<1)|((x&2)<<1)|((gy&2)<<2)|((x&4)<<2)|((gy&4)<<3);
-        const auto pixel=image[std::size_t(y)*width+x];
-        tiled[((gy/8)*(width/8)+x/8)*64+morton]=(pixel<<8)|(pixel>>24);
+    // BUILD142: one 8-texel run per tile row with a Morton table (a 512x512
+    // layer is 1 MiB; the per-texel index math cost the Old 3DS several ms).
+    // Same texel order as the per-texel formula.
+    static const auto order=[](){std::array<std::uint8_t,64> t{};
+        for(unsigned gy=0;gy<8;++gy)for(unsigned x=0;x<8;++x)
+            t[gy*8+x]=std::uint8_t((x&1)|((gy&1)<<1)|((x&2)<<1)|((gy&2)<<2)|((x&4)<<2)|((gy&4)<<3));
+        return t;}();
+    const unsigned tiles_x=width/8;
+    for(unsigned gy=0;gy<height;++gy){
+        const auto* row=image+std::size_t(height-1-gy)*width;
+        const auto* m=&order[(gy&7)*8];
+        auto* out=tiled+std::size_t(gy/8)*tiles_x*64;
+        for(unsigned tx=0;tx<tiles_x;++tx,row+=8,out+=64){
+            for(unsigned k=0;k<8;++k){const auto pixel=row[k];out[m[k]]=(pixel<<8)|(pixel>>24);}
+        }
     }
     if(R_FAILED(publish_for_gpu(resource->gpu.data,bytes)))return reject(Error::gpu_failure);
     stats_.texture_upload_bytes+=bytes;return Error::none;
@@ -623,6 +694,8 @@ Error Citro3DBackend::destroy(Texture handle) noexcept {
     if(texture->target){
         target_surface_count_=0;
         if(active_colour_==texture->gpu.data){active_colour_=nullptr;active_depth_=false;}
+        // A hung GPU may still write the target: leak it rather than free it.
+        if(!gpu_usable())return reject(Error::gpu_failure);
         C3D_RenderTargetDelete(texture->target);if(texture->vram)vram_-=texture->bytes;
     }
     live_ -= texture->bytes; C3D_TexDelete(&texture->gpu); textures_.release(handle);
@@ -644,6 +717,7 @@ Error Citro3DBackend::retire(Texture handle) noexcept {
     texture->retired=true;retirements_=true;return Error::none;
 }
 Error Citro3DBackend::pass(C3D_RenderTarget* target, bool clear, std::uint32_t rgba,const Viewport* area) noexcept {
+    if(!gpu_usable())return reject(Error::gpu_failure); // BUILD137: no GX clear while HOME owns the GPU
     if (!ready_ || !target || !target->frameBuf.colorBuf ||
         state_.phase() == FrameState::Phase::idle) return reject(Error::invalid_phase);
     if(target->frameBuf.colorFmt!=GPU_RB_RGBA8&&target->frameBuf.colorFmt!=GPU_RB_RGB8)return reject(Error::unsupported);
@@ -748,6 +822,20 @@ Error Citro3DBackend::draw_shadow(Mesh handle,const Matrix& mvp,bool mask,std::u
     const auto error=draw_impl(handle,material,mvp,0,0,nullptr,nullptr);
     shadow_stage_=0;
     return error;
+}
+void Citro3DBackend::upload_matrix(unsigned location,const Matrix& matrix) noexcept {
+    auto* target=C3D_FVUnifWritePtr(GPU_VERTEX_SHADER,location,4);
+    for(unsigned row=0;row<4;++row){
+        const auto& r=matrix.row[row];
+        target[row]=FVec4_New(r[0],r[1],r[2],r[3]);
+    }
+    if(eye_!=0){
+        // Horizontal is the second clip row on the portrait render target.
+        // Far geometry separates by 3.6 pixels per eye at full slider.
+        float x[4];
+        for(unsigned c=0;c<4;++c)x[c]=matrix.row[1][c]+eye_*(.018f*matrix.row[3][c]+.144f*matrix.row[2][c]);
+        target[1]=FVec4_New(x[0],x[1],x[2],x[3]);
+    }
 }
 Error Citro3DBackend::draw_impl(Mesh handle,const Material& material,const Matrix& mvp,
     std::size_t first,std::size_t count,const LightingInput* lighting,const BatchSpan* batch) noexcept {
@@ -860,7 +948,11 @@ Error Citro3DBackend::draw_impl(Mesh handle,const Material& material,const Matri
         }else{C3D_SetBufInfo(&mesh->binding);buffers_resident_=raw_state_&&mesh->binding.bufCount==1;}
         bound_mesh_ = handle; ++stats_.mesh_binds;
     }
-    const bool shadow_changed=bound_shadow_stage_!=shadow_stage_||(shadow_stage_&&bound_shadow_reference_!=shadow_reference_);
+    // Stencil stage of this draw: a shadow pass (1/2), or owner marking (3)
+    // for a polygon-ID-1 material while the image draws shadow volumes.
+    const std::uint8_t stage=shadow_stage_?shadow_stage_:(owner_marking_&&active_depth_&&material.shadow_id)?3:0;
+    const std::uint8_t stage_reference=shadow_stage_?shadow_reference_:(stage?0x80:0);
+    const bool shadow_changed=bound_shadow_stage_!=stage||(stage&&bound_shadow_reference_!=stage_reference);
     if (!material_valid_ || !vertex_material_valid_ || shadow_changed || !(bound_material_ == material)) {
         // BUILD134: one changed effect field made the SDK send its whole
         // block again (34 command words). Write the field into the SDK's
@@ -934,26 +1026,30 @@ Error Citro3DBackend::draw_impl(Mesh handle,const Material& material,const Matri
             ++stats_.pipeline_changes;
         }
         if(!material_valid_||bound_material_.depth_test!=material.depth_test||bound_material_.depth_write!=material.depth_write||
-           (bound_material_.blend==Blend::highlight)!=(material.blend==Blend::highlight)||bound_shadow_stage_!=shadow_stage_){
+           (bound_material_.blend==Blend::highlight)!=(material.blend==Blend::highlight)||bound_shadow_stage_!=stage){
             // The shadow mask writes neither colour nor depth: only the stencil.
             const auto function=material.blend==Blend::highlight?GPU_EQUAL:GPU_GREATER;
-            const auto mask=shadow_stage_==1?GPU_WRITEMASK(0):material.depth_write ? GPU_WRITE_ALL : GPU_WRITE_COLOR;
+            const auto mask=stage==1?GPU_WRITEMASK(0):material.depth_write ? GPU_WRITE_ALL : GPU_WRITE_COLOR;
             if(raw_state_)pica::depth_test(*shadow_.effect,material.depth_test,function,mask,delta);
             else C3D_DepthTest(material.depth_test,function,mask);
             ++stats_.pipeline_changes;
         }
         if(shadow_changed){
-            const bool enable=shadow_stage_!=0;
-            const auto function=shadow_stage_==2?GPU_EQUAL:GPU_ALWAYS;
-            const int reference=enable?shadow_reference_:0;
-            const auto depth_fail=shadow_stage_==1?GPU_STENCIL_REPLACE:shadow_stage_==2?GPU_STENCIL_ZERO:GPU_STENCIL_KEEP;
-            const auto pass=shadow_stage_==2?GPU_STENCIL_ZERO:GPU_STENCIL_KEEP;
-            if(raw_state_)pica::stencil(*shadow_.effect,enable,function,unsigned(reference),0xff,0xff,GPU_STENCIL_KEEP,depth_fail,pass,delta);
+            // Stages: 1 volume mask (bit 0 on depth fail), 2 darken where the
+            // stencil is exactly 1 (an owner's bit 7 makes it 0x81: skipped),
+            // 3 owner mark (bit 7 where the owner is visible).
+            const bool enable=stage!=0;
+            const auto function=stage==2?GPU_EQUAL:GPU_ALWAYS;
+            const int reference=enable?stage_reference:0;
+            const auto depth_fail=stage==1?GPU_STENCIL_REPLACE:stage==2?GPU_STENCIL_ZERO:GPU_STENCIL_KEEP;
+            const auto pass=stage==2?GPU_STENCIL_ZERO:stage==3?GPU_STENCIL_REPLACE:GPU_STENCIL_KEEP;
+            const unsigned write_mask=stage==3?0x80u:stage?0x01u:0xffu;
+            if(raw_state_)pica::stencil(*shadow_.effect,enable,function,unsigned(reference),0xff,write_mask,GPU_STENCIL_KEEP,depth_fail,pass,delta);
             else{
-                C3D_StencilTest(enable,function,reference,0xff,0xff);
+                C3D_StencilTest(enable,function,reference,0xff,write_mask);
                 C3D_StencilOp(GPU_STENCIL_KEEP,depth_fail,pass);
             }
-            bound_shadow_stage_=shadow_stage_;bound_shadow_reference_=shadow_reference_;++stats_.pipeline_changes;
+            bound_shadow_stage_=stage;bound_shadow_reference_=stage_reference;++stats_.pipeline_changes;
         }
         if(!material_valid_||bound_material_.fog!=material.fog){
             // The table index is the window depth as stored (1 nearest).
@@ -980,8 +1076,7 @@ Error Citro3DBackend::draw_impl(Mesh handle,const Material& material,const Matri
             const auto bit=std::uint8_t(1u<<pose);
             const Matrix& matrix=*batch->palette[pose]; // the plan's leased frame
             if(!(palette_matrix_valid_&bit)||std::memcmp(&palette_matrix_[pose],&matrix,sizeof(Matrix))){
-                auto* target=C3D_FVUnifWritePtr(GPU_VERTEX_SHADER,matrix_uniform_+pose*4,4);
-                for(unsigned row=0;row<4;++row){const auto& r=matrix.row[row];target[row]=FVec4_New(r[0],r[1],r[2],r[3]);}
+                upload_matrix(matrix_uniform_+pose*4,matrix);
                 palette_matrix_[pose]=matrix;palette_matrix_valid_|=bit;++stats_.matrix_uploads;
             }
             if(batch->lit&&batch->lighting.mask&&(!(palette_basis_valid_&bit)||palette_basis_[pose]!=batch->basis[pose])){
@@ -991,9 +1086,7 @@ Error Citro3DBackend::draw_impl(Mesh handle,const Material& material,const Matri
             }
         }
     }else if (!matrix_valid_ || std::memcmp(&bound_matrix_, &mvp, sizeof(mvp))) {
-        for (unsigned i = 0; i < 4; ++i)
-            C3D_FVUnifSet(GPU_VERTEX_SHADER, matrix_uniform_+i,
-                         mvp.row[i][0],mvp.row[i][1],mvp.row[i][2],mvp.row[i][3]);
+        upload_matrix(matrix_uniform_,mvp);
         bound_matrix_ = mvp; matrix_valid_ = true; ++stats_.matrix_uploads;
     }
     if(aux_units_pending_){
@@ -1036,6 +1129,9 @@ Error Citro3DBackend::draw_impl(Mesh handle,const Material& material,const Matri
 }
 Error Citro3DBackend::end() noexcept {
     if (!ready_ || !state_.end()) return reject(Error::invalid_phase);
+    // The frame is abandoned (citro3d stays in it; begin() refuses until the
+    // GPU is usable again, which a hung GPU never is in this boot).
+    if(!gpu_usable())return reject(Error::gpu_failure);
     Timed time(stats_.submit_ticks, timings_);
     if(capture_.armed){
         // Every list of this frame is still in the command buffer: each
@@ -1051,13 +1147,15 @@ Error Citro3DBackend::end() noexcept {
     if(late_fence_){
         // The copy to the LCD buffer is queued by FrameEnd: the buffer it
         // writes is still on screen while the previous swap is pending.
-        const auto start=timings_?svcGetSystemTick():0;
-        while(gspIsPresentPending(GSP_SCREEN_TOP)||gspIsPresentPending(GSP_SCREEN_BOTTOM))gspWaitForAnyEvent();
-        if(timings_){const auto waited=svcGetSystemTick()-start;stats_.wait_ticks+=waited;stats_.submit_ticks-=waited;}
+        const auto start=svcGetSystemTick();
+        wait_present_fence();
+        const auto waited=svcGetSystemTick()-start;stats_.blocked_ticks+=waited;
+        if(timings_){stats_.wait_ticks+=waited;stats_.submit_ticks-=waited;}
     }
     // All mutated resources were explicitly flushed during upload. This flag
     // flushes commands and avoids a whole-linear-heap flush on every frame.
-    C3D_FrameEnd(GX_CMDLIST_FLUSH);
+    watch_stage(SM64DS_WATCH_WORKER_SUBMIT);
+    {LockPriority boost(lock_priority_);C3D_FrameEnd(GX_CMDLIST_FLUSH);}
     return Error::none;
 }
 std::size_t Citro3DBackend::describe_textures(TextureInfo* out,std::size_t capacity) const noexcept {

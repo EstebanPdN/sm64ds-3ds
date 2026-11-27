@@ -7,6 +7,7 @@
 #include "scene_renderer.hpp"
 #include "game_material.hpp"
 #include "lighting.hpp"
+#include "vertex_lighting.hpp"
 #include "scene_capture.hpp"
 #include "scene_interpolation.hpp"
 #include "perf_switch.hpp"
@@ -20,9 +21,11 @@
 #include "menu_backgrounds.hpp"
 #include "menu_backdrops.hpp"
 #include "dialogue_hooks.hpp"
+#include "dialogue_window_view.hpp"
 #include "frame_timeline.hpp"
 #include "../native_diagnostics.hpp"
 #include "../audio_diagnostics.hpp"
+#include "hang_watchdog.hpp"
 #include "../audio_mixer_kernels.hpp"
 #include "build_version.hpp"
 #include "console_profile.hpp"
@@ -49,19 +52,25 @@
 using namespace sm64ds::render;
 namespace hooks=sm64ds::render::game_hooks;
 extern "C" std::int16_t data_02082214[];
+extern "C" bool sm64ds_opening_map();
 extern "C" void sm64ds_native_cadence_pause_ended(std::uint64_t);
+extern "C" unsigned sm64ds_render60_scene() __attribute__((weak));
 // BUILD115 exit safety (defined at the end of this file).
 extern "C" void sm64ds_fatal_handlers_install(void);
 extern "C" void sm64ds_fresh_native_mark_clean_exit(void);
 extern "C" void sm64ds_heap_stats(unsigned* used,unsigned* free_chunks,unsigned* unclaimed);
 // Set when a fatal error stopped a thread other than the game thread.
 volatile int sm64ds_fatal_thread_pending=0;
+extern "C" void sm64ds_save_writer_probe() __attribute__((weak)); // save_writer.cpp
 namespace {
 // One complete capture. Two of them alternate: the game captures one while
 // the render worker draws the other (sealed frames are immutable).
 struct Store {
     ntr::Framebuffer sky{};
     ntr::Framebuffer map_foreground{};
+    // BUILD141: OBJs behind the map's GPU text layers (linear memory, made
+    // on the first native map; null: no layers for this store).
+    ntr::Framebuffer* map_behind=nullptr;
     AffineImage map{};
     std::array<Occurrence,768> occurrences{};
     std::array<PreparedPart,4096> parts{};
@@ -107,6 +116,9 @@ struct Runtime {
     Dry dry=Dry::none;
     unsigned unpresented=0;   // consecutive updates whose image was not shown
     std::uint64_t dry_behind=0,dry_cap=0,late_skips=0,busy_drops=0,dry_busy=0;
+    // BUILD137: shared-core liveness waits (see starvation_guard) and their wall time.
+    std::uint64_t starvation_waits=0,starvation_ticks=0,starvation_timeouts=0;
+    bool lifecycle_gpu_blocked=false; // BUILD137: suspended with a live render worker
     // BUILD121: total ticks of finished updates (DS logic, capture, 2D and
     // presentation), written by the game side, read by the render worker.
     std::uint64_t game_active_ticks=0;
@@ -229,8 +241,24 @@ void capture_component(bool producers_ok,int unmigrated_2d){
         static_cast<unsigned long long>(svcGetSystemTick()-start));
 
 }
+// BUILD137: game-thread cost of each menu hook (file selector diagnosis).
+// Wall ticks; summed per 120-frame report window, printed by report_playable.
+// Only with timings on (two system-tick calls per hook otherwise saved).
+// Atomic: the game thread adds, the render worker's report reads and resets.
+struct MenuHookTicks {std::atomic<std::uint64_t> cell{0},sprite{0},stroke{0},grid{0};std::atomic<unsigned> grids{0};} menu_hook_ticks;
+bool hook_timing=false;
+struct HookTimer {std::atomic<std::uint64_t>& slot;std::uint64_t start;explicit HookTimer(std::atomic<std::uint64_t>& s):slot(s),start(hook_timing?svcGetSystemTick():0){}
+    ~HookTimer(){if(hook_timing)slot.fetch_add(svcGetSystemTick()-start,std::memory_order_relaxed);}};
+// BUILD137: an update whose image will not be shown (dry: Old's one image
+// per two display events in the 60 Hz menus, a busy worker, a late update)
+// is discarded whole at presentation, so the menu producers skip their work
+// like the model producers already do (hooks::set_dry). In the file selector
+// the wave grid alone cost 4.3 ms per update (Azahar New 3DS at 50% clock).
+bool dry_menu_update(const Runtime& owner){return owner.open&&owner.dry!=Runtime::Dry::none;}
 bool submit_menu_cell(const ImageLayer& image,void* user){
+    HookTimer timer(menu_hook_ticks.cell);
     auto& owner=*static_cast<Runtime*>(user);
+    if(dry_menu_update(owner))return true;
     return owner.open&&owner.fr->append_image(image)==Error::none;
 }
 bool submit_particle(const hooks::ParticleDraw& draw,void* user){
@@ -246,7 +274,9 @@ bool submit_particle(const hooks::ParticleDraw& draw,void* user){
     return error==Error::none;
 }
 bool submit_menu_sprite(const hooks::MenuSpriteDraw& draw,void* user){
+    HookTimer timer(menu_hook_ticks.sprite);
     auto& owner=*static_cast<Runtime*>(user);
+    if(dry_menu_update(owner))return true;
     if(!owner.open||!owner.camera_valid||!owner.view_valid)return false;
     QuadState state;state.material=draw.material;state.image=draw.image;state.polygon_id=draw.polygon_id;state.fog=draw.fog;
     auto error=game::project_pose(game::compose(draw.object,owner.view),owner.camera,state.object_to_clip);
@@ -259,7 +289,9 @@ bool submit_menu_sprite(const hooks::MenuSpriteDraw& draw,void* user){
     hooks::menu_sprite_geometry_count(result.source_quads,result.vertices/4);return true;
 }
 bool submit_menu_stroke(const game::SketchStroke& stroke,void* user){
+    HookTimer timer(menu_hook_ticks.stroke);
     auto& owner=*static_cast<Runtime*>(user);
+    if(dry_menu_update(owner))return true;
     if(!owner.open||!owner.camera_valid||!owner.view_valid)return false;
     QuadState state;state.material.cull=Cull::none;state.material.blend=stroke.alpha<31?Blend::alpha:Blend::opaque;
     state.material.depth_write=stroke.alpha==31;state.polygon_id=6;
@@ -271,13 +303,17 @@ bool submit_menu_stroke(const game::SketchStroke& stroke,void* user){
     return error==Error::none;
 }
 bool submit_menu_grid(const hooks::MenuGridDraw& draw,void* user){
+    HookTimer timer(menu_hook_ticks.grid);
+    menu_hook_ticks.grids.fetch_add(1,std::memory_order_relaxed);
     auto& owner=*static_cast<Runtime*>(user);
+    if(dry_menu_update(owner))return true;
     if(!owner.open||!owner.camera_valid||!owner.view_valid)return false;
     PreparedPart part;part.material=draw.material;part.image=draw.image;part.visible=true;part.highlight=draw.lighting.grey;
     // ca5f0 pushes the position stack (0x04000444 is MTX_PUSH, not
     // MTX_MODE), then translates/scales locally under the current camera.
     // Scaling the camera translation clips the entire grid out of view.
     auto error=game::project_pose(game::compose(draw.object,owner.view),owner.camera,part.object_to_clip);
+    if(error==Error::none&&main_lcd()==Screen::top)for(auto& value:part.object_to_clip.row[1])value*=1.25f;
     std::size_t capacity=0,count=0;auto* vertices=owner.fr->skin_workspace(capacity);
     if(error==Error::none)error=game::wave_grid(draw.geometry,vertices,capacity,count);
     if(owner.timings&&error==Error::none){
@@ -296,7 +332,29 @@ bool submit_menu_grid(const hooks::MenuGridDraw& draw,void* user){
     }
     LightingInput light;light.lights=&draw.lights;light.material=draw.lighting;
     std::copy_n(owner.view.value,9,light.normal.begin());
-    if(error==Error::none)error=owner.fr->append_mesh(draw.file_id,part,&light,vertices,count);
+    // BUILD138: the file selector's grid is lit here, on the CPU, and drawn
+    // unlit. Its materials select the grey and toon branches of the vertex
+    // shader, which no other scene uses: the Old 3DS GPU hung on the first
+    // file-selector image (console report, BUILD 137) while Azahar drew it,
+    // and every other branch it takes has run on the console (checked with
+    // tools/check_pica_hardware.py). PreparedVertexLighting is the CPU copy
+    // of that shader arithmetic (tests/native_renderer/test_vertex_lighting.py
+    // compares them), expanded to RGBA8 the same way; alpha stays 255 because
+    // the lit path ignores the vertex alpha. Each grid point repeats in about
+    // six vertices, so colours are cached by packed normal.
+    if(error==Error::none)error=validate_lighting(light);
+    if(error==Error::none){
+        const PreparedVertexLighting lit(light);
+        static std::uint32_t keys[256];static std::array<std::uint8_t,4> colours[256];
+        std::fill(std::begin(keys),std::end(keys),0xffffffffu);
+        for(std::size_t i=0;i<count;++i){auto& v=vertices[i];
+            const std::uint32_t key=(std::uint32_t(v.x)&1023)|((std::uint32_t(v.y)&1023)<<10)|((std::uint32_t(v.z)&1023)<<20);
+            const unsigned slot=(key^(key>>9)^(key>>18))&255;
+            if(keys[slot]!=key){keys[slot]=key;colours[slot]=lit.colour({v.x,v.y,v.z});}
+            const auto& c=colours[slot];v.base.r=c[0];v.base.g=c[1];v.base.b=c[2];v.base.a=255;
+        }
+    }
+    if(error==Error::none)error=owner.fr->append_mesh(draw.file_id,part,nullptr,vertices,count);
     if(error!=Error::none)owner.fr->invalidate(error);
     return error==Error::none;
 }
@@ -390,6 +448,11 @@ void verdict(Error error){
 // the Bowser fights at 15-20 FPS with update + render above 33 ms).
 namespace {
 std::atomic<int> render_core1_granted{0},audio_core_used{-1};
+// BUILD142: where the game thread's presentation time goes, per phase (wait
+// for the worker, dialogue capture, seal, engine A, map, engine B, sky), for
+// the situation reports. Reset with the audio window.
+struct GamePhases {std::uint64_t ticks[7]{};std::uint32_t calls=0;};
+GamePhases game_phases;
 }
 // BUILD129: opt-in only. The BUILD128 hardware tour (render core 1 at 80%,
 // audio core 0) lost on 45 of 49 levels (27.5 -> 23.9 FPS): GSP and FS run
@@ -454,6 +517,19 @@ extern "C" int sm64ds_fresh_native_startup(){
     if(!requested)return 1;
     if(runtime)return 0;
     sm64ds_fatal_handlers_install();
+    // BUILD137: the game threads run below libctru's APT event thread
+    // (priority 0x31 on the application core, apt.c), which answers HOME,
+    // POWER and sleep. The main thread was 0x30: when the game update alone
+    // filled the Old 3DS core (file selector), that thread never ran again,
+    // so HOME and POWER stopped answering and the console had to be switched
+    // off. Every game-side thread derives its priority from this one (game
+    // thread = main, render worker +1, mixer -2 on core 1), so their order is
+    // unchanged; only the APT handler (idle unless the system signals) now
+    // preempts the game. The GSP (0x1A) and DSP (0x18) threads were above already.
+    {s32 priority=0x30;svcGetThreadPriority(&priority,CUR_THREAD_HANDLE);
+     const s32 wanted=0x32;
+     const bool lowered=priority<wanted&&R_SUCCEEDED(svcSetThreadPriority(CUR_THREAD_HANDLE,wanted));
+     std::printf("Native thread priority: main=0x%lx -> 0x%lx (APT handler 0x31 above the game)\n",(long)priority,(long)(lowered?wanted:priority));}
     log_resource_use("boot");
     // BUILD121: no fs prefetch thread. It asks for core 1, where libctru
     // allows one application thread, owned here by audio; on hardware every
@@ -462,8 +538,12 @@ extern "C" int sm64ds_fresh_native_startup(){
     // env.txt (development builds) can still set SM64DS_NO_FS_PREFETCH=0.
     setenv("SM64DS_NO_FS_PREFETCH","1",0);
     sm64ds_test_mode_boot(); // before the profile switch below is read
+    if(sm64ds_save_writer_probe)sm64ds_save_writer_probe(); // development: SM64DS_DEV_SAVE_PROBE=1
     sm64ds_fresh_native_math_configure();
     void* storage=std::malloc(sizeof(Runtime));if(!storage)return 0;
+    // BUILD141: the PPU's GPU text-layer copies (1 MiB each) live in linear
+    // memory, not in the 80 MB title's libc heap.
+    ntr::ppu_text_alloc=[](size_t n)->void*{return linearAlloc(n);};ntr::ppu_text_free=[](void* p){linearFree(p);};
     runtime=new(storage)Runtime{};const auto catalog=prepared_model_catalog();const auto images=prepared_image_catalog();
     const auto menu=hooks::prepared_menu_cells();const auto backgrounds=hooks::prepared_menu_backgrounds();
     const auto objects=hooks::prepared_menu_objects();
@@ -516,7 +596,7 @@ extern "C" int sm64ds_fresh_native_startup(){
     hooks::configure_dialogue(runtime->playable&&images.find(6000));
     hooks::menu_oam_lenient(runtime->playable);
     const char* profile=std::getenv("SM64DS_FRESH_NATIVE_PROFILE");runtime->timings=profile?std::strcmp(profile,"1")==0:native_diagnostics::enabled();
-    hooks::set_stage_profile(runtime->timings);
+    hooks::set_stage_profile(runtime->timings);hook_timing=runtime->timings;
     const char* continuation=std::getenv("SM64DS_FRESH_NATIVE_DIAGNOSTIC_CONTINUE");runtime->diagnostic_continue=continuation&&std::strcmp(continuation,"1")==0;
     if(runtime->diagnostic_continue)std::puts("Fresh native diagnostics: continueUnsubmittedFrames=1 originalSceneAccepted=0 gpuFailuresNotIgnored=1");
     if(runtime->timings){hooks::set_clock(svcGetSystemTick);hooks::menu_sprite_clock(svcGetSystemTick);hooks::particle_clock(svcGetSystemTick);hooks::menu_oam_clock(svcGetSystemTick);hooks::menu_display_clock(svcGetSystemTick);}
@@ -526,6 +606,36 @@ extern "C" int sm64ds_fresh_native_startup(){
 extern "C" int sm64ds_fresh_native_enabled(){return requested&&runtime;}
 extern "C" void sm64ds_fresh_native_actor(std::uint64_t identity){if(runtime)runtime->producer.owner(identity);}
 extern "C" int sm64ds_fresh_native_on_worker(){return native_worker_thread;}
+namespace {
+// BUILD140: title star. dScDSMT state 11 fades the lower screen in from black
+// (RequestScreenFade(4): -16 -> 0 over 16 updates, 267 ms at 60 Hz) and plays
+// the star sound on update 1. BUILD 139 loaded the look-ahead banks and the
+// title 2D inside the first two render jobs (Old 3DS: 1603 + 304 ms), so the
+// sound came ~1.9 s before the star, which then appeared at once.
+void queue_menu_layout(SceneRenderer& renderer,unsigned layout,unsigned language,bool engine1_only){
+    const auto objects=hooks::prepared_menu_objects();
+    for(unsigned engine=0;engine<2;++engine){const auto* view=hooks::menu_obj_view(objects,layout,engine,language);if(!view)continue;
+        std::uint32_t previous=0xffffffffu;
+        for(std::size_t b=0;b<view->cells.banks;++b){const auto bank=view->cells.bank[b].image_bank;if(bank!=previous)renderer.preload_image_bank(bank);previous=bank;}}
+    const auto backdrops=hooks::prepared_menu_backdrops();
+    for(std::size_t i=0;i<backdrops.views;++i){const auto& view=backdrops.view[i];
+        if(view.layout==layout&&(view.languages&(1u<<language))&&(!engine1_only||view.engine==1))renderer.preload_canvas(view.bank);}
+}
+bool warm_title(Runtime& r,unsigned language){
+    if(!r.graphics||!r.playable)return false;
+    const auto start=svcGetSystemTick();
+    r.renderer.preload_model(205);                       // the title star, data/DSMT/face_demo_mariostar.bmd
+    if(language<6){
+        r.renderer.preload_image_bank(1);                 // star sparkles
+        queue_menu_layout(r.renderer,1,language,true);    // title 2D: 4100/4101, canvases 5206/5207
+        queue_menu_layout(r.renderer,3,language,false);   // file selector: 4110/4111, canvases 5208-5210
+    }
+    const auto error=r.renderer.warm(r.scene);
+    std::printf("Native title warm-up: language=%u scene=%llu ms=%.1f status=%s\n",language,(unsigned long long)r.scene,
+        double(svcGetSystemTick()-start)*1000.0/double(SYSCLOCK_ARM11),describe(error));
+    return error==Error::none&&language<6;
+}
+}
 extern "C" void sm64ds_fresh_native_menu_preload_selector(unsigned language){
     if(runtime&&language<6)runtime->selector_language=language;
 }
@@ -540,6 +650,7 @@ extern "C" void sm64ds_fresh_native_menu_2d_start(){
 extern "C" bool sm64ds_render60_need_exact();
 namespace {
 bool render_worker_blocks_update(); // render worker section below
+bool render_worker_in_tail();        // render worker section below
 void note_game_active();            // presentation section below
 // At least one update in three is shown, however late the game runs.
 constexpr unsigned kMaxUnpresented=2;
@@ -566,22 +677,42 @@ PresentMode present_mode(){
 // Old 3DS (render worker on the game's core): both images of an update must
 // fit, with the update itself, in one 33.4 ms period. Game thread only.
 struct InterpolationBudget{
-    std::uint64_t image_ticks=0,second_ticks=0; // smoothed worker cost: first image, exact second image
-    unsigned hold=0,backoff=30,streak=0;        // updates left at one image; next hold; clean interpolated updates
+    // BUILD140: CPU time and wall time are kept apart. The console counted
+    // the second image's GPU and LCD waits (blocked, the core is free) as
+    // worker cost, so 'update + both images' never fitted and Lock 60 stayed
+    // at 29.9 FPS. The CPU parts must fit in 92% of a period; the wall time
+    // of both images (the tail may overlap the next update) in one period.
+    std::uint64_t image_ticks=0,image_cpu_ticks=0;   // smoothed first image: wall, CPU
+    std::uint64_t second_ticks=0,second_cpu_ticks=0; // second image: wall up to the swap, CPU
+    unsigned hold=0,backoff=8,streak=0;        // updates left at one image; next hold; clean interpolated updates
     std::uint64_t allowed=0,over=0,misses=0;    // decisions and missed second images
+    std::uint64_t over_cpu=0,over_tail=0;       // which test refused
+    unsigned second_age=0;                      // updates since the second image was last measured
 } interpolation_budget;
 bool interpolation_fits(std::uint64_t update_ticks){
     auto& b=interpolation_budget;
+    if(b.second_age<1000000)++b.second_age;
     if(b.hold){--b.hold;return false;}
     if(!b.image_ticks)return false; // no measurement yet
-    const auto second=b.second_ticks?b.second_ticks:b.image_ticks;
+    // BUILD139: the second image is only measured when a pair is drawn, so a
+    // cost taken in a heavy scene (the opening) used to refuse every pair
+    // for the rest of the boot. After 4 s without a measurement it is
+    // estimated from the current first image instead (the exact second image
+    // reuses its uploads, quads, shadows and map), so pairs are tried again.
+    constexpr std::uint64_t period=std::uint64_t(SYSCLOCK_ARM11)*560190ull*2ull/33513982ull;
+    const bool measured=b.second_ticks&&b.second_age<120;
+    const auto second_cpu=measured?b.second_cpu_ticks:b.image_cpu_ticks*3/4;
+    const auto second_wall=measured?b.second_ticks:b.image_ticks*7/4;
     // 92% of the period: the rest covers audio maintenance and wake-up jitter.
-    const bool fits=update_ticks+b.image_ticks+second<=std::uint64_t(SYSCLOCK_ARM11)*560190ull*2ull/33513982ull*92ull/100ull;
-    if(fits)++b.allowed;else ++b.over;
+    const bool cpu=update_ticks+b.image_cpu_ticks+second_cpu<=period*92/100;
+    const bool tail=b.image_ticks+second_wall<=period;
+    const bool fits=cpu&&tail;
+    if(fits)++b.allowed;else{++b.over;b.over_cpu+=!cpu;b.over_tail+=!tail;}
     return fits;
 }
 void interpolation_missed(){
-    auto& b=interpolation_budget;++b.misses;b.hold=b.backoff;b.backoff=std::min(b.backoff*2u,480u);b.streak=0;
+    // A miss waits at most 1 s before pairs are tried again.
+    auto& b=interpolation_budget;++b.misses;b.hold=b.backoff;b.backoff=std::min(b.backoff*2u,30u);b.streak=0;
 }
 bool skips_enabled(){static const bool enabled=[](){const char* e=std::getenv("SM64DS_FRESH_NATIVE_SKIP");return !e||*e!='0';}();return enabled;}
 // No skip while an exact image is owed: the title canvas, a diagnostic or
@@ -607,7 +738,7 @@ Runtime::Dry dry_decision(const Runtime& r){
     // give that time to the render. Not limited by kMaxUnpresented (nothing
     // could be shown); the first update after the job ends captures again.
     static const bool busy_dry=[](){const char* e=std::getenv("SM64DS_FRESH_NATIVE_BUSY_DRY");return !e||*e!='0';}();
-    if(busy_dry&&render_worker_blocks_update())return Runtime::Dry::busy;
+    if(busy_dry&&render_worker_blocks_update()&&!render_worker_in_tail())return Runtime::Dry::busy;
     if(r.unpresented<kMaxUnpresented&&observed_cadence::behind())return Runtime::Dry::behind;
     return Runtime::Dry::none;
 }
@@ -641,7 +772,7 @@ extern "C" int sm64ds_fresh_native_graphics(){
     if(!runtime)return 0;
     const char* root=std::getenv("SM64DS_FRESH_NATIVE_ASSETS");if(!root)root="sdmc:/3ds/sm64ds/native";
     const auto error=runtime->renderer.init(prepared_model_catalog(),root,sm64ds_fresh_native_shader_shbin,
-        sm64ds_fresh_native_shader_shbin_size,12*1024*1024,runtime->timings,true,prepared_image_catalog(),prepared_canvas_catalog(),console_profile::current().antialias);
+        sm64ds_fresh_native_shader_shbin_size,console_profile::current().native_gpu,runtime->timings,true,prepared_image_catalog(),prepared_canvas_catalog(),console_profile::current().antialias);
     std::printf("Native presentation profile: targetFPS=%u antialias=%ux interface=unchanged logicClock=fixed\n",
         present_mode().divisor==2?30u:60u,console_profile::current().antialias?2u:1u);
     runtime->graphics=error==Error::none;
@@ -667,35 +798,88 @@ extern "C" int sm64ds_fresh_native_graphics(){
                 std::printf("Native menu preload queued: buttons=%s portraits=%s\n",describe(buttons),describe(portraits));
             }
         }
+        // BUILD140: load the title's resources now, before the game loop and
+        // the sound start, so the star fades in from its first update.
+        const auto* warm_title_option=std::getenv("SM64DS_NATIVE_WARM_TITLE");
+        if((!warm_title_option||*warm_title_option!='0')&&warm_title(*runtime,runtime->selector_language))runtime->selector_language=6;
     }
     if(!runtime->graphics)std::printf("Fresh native initialization: %s\n",describe(error));
     return runtime->graphics;
 }
+namespace {
+// BUILD129/137: stdout buffering. game_main runs the game with stdout
+// unbuffered, so every printf was a synchronous SD write on the game or
+// render thread (hardware: 1.4-2.5 s stalls, BUILD121). BUILD121 buffered it
+// from the first scene change, which left the title, the menu and the file
+// selector unbuffered: every log line there was an SD write on the game
+// thread of the Old 3DS menu (BUILD 137: buffered from the first game update;
+// boot diagnostics before it stay unbuffered). Flushed at each scene change,
+// every 20 s, inside test report pauses, at shutdown, on the fatal paths and
+// by the hang watchdog. Returns true when this call turned buffering on.
+char log_buffer[32*1024];
+bool log_buffered=false;
+bool buffer_log(){
+    if(log_buffered)return false;
+    log_buffered=std::setvbuf(stdout,log_buffer,_IOFBF,sizeof log_buffer)==0;
+    // BUILD129: BUILD128's post-tour log shows the game thread's
+    // once-a-minute fflush froze play for 0.4-0.7 s (21-25 KB per SD
+    // write). A separate thread now writes the buffer every 20 s (under
+    // 10 KB, so it never fills during play).
+    // BUILD137: at 0x31 (above the game, 0x32): at 0x3f it never ran while
+    // the game kept the Old 3DS core busy, the buffer filled and the printing
+    // thread wrote it synchronously. The flush is mostly an SD wait (no CPU);
+    // a printf during it waits for the stdout lock, as before.
+    if(log_buffered)threadCreate([](void*){for(;;){svcSleepThread(20000000000LL);std::fflush(stdout);}},nullptr,4096,0x31,-2,true);
+    return log_buffered;
+}
+}
+// BUILD137 hang watchdog: the buffered log bytes not yet on the SD (read
+// racily from another thread; diagnostics only, never written back).
+extern "C" unsigned sm64ds_log_pending(const char** data){
+    if(!log_buffered)return 0;
+    const auto* start=reinterpret_cast<const unsigned char*>(log_buffer);const auto* end=stdout->_p;
+    if(end<start||end>start+sizeof log_buffer)return 0;
+    *data=log_buffer;return unsigned(end-start);
+}
+namespace {void release_host_caches(const char* why);bool map_hold_blocked=false;std::uint64_t last_update_ticks=0;} // BUILD140, defined after the render worker
 extern "C" void sm64ds_fresh_native_scene_changed(){
     if(!runtime)return;
-    if(runtime->native_menu){runtime->native_menu=false;hooks::set_bridge_2d(runtime->playable);std::puts("Native menu2D test: scene exit; gameplay route restored");}
+    if(runtime->native_menu){
+        // BUILD140: the DS keeps the old scene's fade in BLDCNT/BLDY across the
+        // scene change; the next scene stays white until its own fade-in (the
+        // first gameplay image after File 1 used to flash unfaded).
+        hooks::menu_display_commit_registers();
+        std::printf("Native menu2D exit: BLDCNT=%04x/%04x BLDY=%u/%u\n",unsigned(ntr::io_read(0x04000050,2)),
+            unsigned(ntr::io_read(0x04001050,2)),unsigned(ntr::io_read(0x04000054,2)&31),unsigned(ntr::io_read(0x04001054,2)&31));
+        runtime->native_menu=false;hooks::set_bridge_2d(runtime->playable);std::puts("Native menu2D test: scene exit; gameplay route restored");}
     ++runtime->scene;runtime->camera_valid=runtime->view_valid=false;hooks::lighting_reset();hooks::menu_oam_scene_changed();hooks::menu_display_scene_changed();hooks::menu_background_scene_changed();
     if(runtime->open)runtime->fr->invalidate(Error::unsupported); // never publish a mixed-scene transition frame
-    // BUILD121: buffered log from the first scene change on. game_main runs
-    // the whole game with stdout unbuffered, so every printf was a synchronous
-    // SD write on the game or render thread, and a render job that printed
-    // while the game thread used the SD waited for it (hardware: 1.4-2.5 s
-    // stalls). Startup and the title stay unbuffered for boot diagnostics.
-    // Flushed here (a scene change already loads files), every 20 s, inside
-    // test report pauses, at shutdown and on the fatal paths.
-    static bool buffered=false;
-    if(!buffered){static char log_buffer[32*1024];buffered=std::setvbuf(stdout,log_buffer,_IOFBF,sizeof log_buffer)==0;
-        // BUILD129: BUILD128's post-tour log shows the game thread's
-        // once-a-minute fflush froze play for 0.4-0.7 s (21-25 KB per SD
-        // write). The lowest-priority thread on the game's core now writes
-        // the buffer every 20 s (under 10 KB, so it never fills during
-        // play); it only runs while the game and render threads wait.
-        if(buffered)threadCreate([](void*){for(;;){svcSleepThread(20000000000LL);std::fflush(stdout);}},nullptr,4096,0x3f,-2,true);}
-    else std::fflush(stdout);
+    // A scene change already loads files: write the buffered log here (see
+    // buffer_log; the buffer is normally on since the first game update).
+    if(!buffer_log())std::fflush(stdout);
+    release_host_caches("scene change");
 }
+namespace {
+void starvation_guard(Runtime& r); // render worker section below
+void wait_worker();
+// BUILD140: frees the PPU's second cache ways while no job runs (scene
+// changes, and after a model bank load ran out of memory on the worker).
+std::atomic<bool> host_memory_pressure{false};
+void release_host_caches(const char* why); // after the render worker
+}
+// Called by the scene renderer (worker) when a model bank load ran out of memory.
+extern "C" void sm64ds_render_memory_pressure(){host_memory_pressure.store(true,std::memory_order_release);}
 extern "C" void sm64ds_playable_script_tick();
 extern "C" void sm64ds_fresh_native_begin(){
     if(!runtime)return;
+    if(host_memory_pressure.exchange(false,std::memory_order_acq_rel))release_host_caches("model bank out of memory");
+    // Development (.3dsx env.txt SM64DS_DEV_PPU_WAY=1): reserve engine B's
+    // second cache way early, as BUILD 139 did on the console, to check that
+    // a scene change releases it.
+    {static const bool force=std::getenv("SM64DS_DEV_PPU_WAY")!=nullptr;static bool done=false;
+     if(force&&!done&&runtime->frames>30&&runtime->frames%30==0){wait_worker();ntr::ppu_pin_candidate_ways(true);
+        done=ntr::ppu_unpinned_way_available(ntr::ENGINE_B);ntr::ppu_pin_candidate_ways(false);
+        if(done)std::printf("SM64DS_DEV_PPU_WAY: engine B way 2 reserved at frame %llu scene %llu\n",(unsigned long long)runtime->frames,(unsigned long long)runtime->scene);}}
     sm64ds_test_mode_update(); // may write a report: excluded from update timing below
     sm64ds_playable_script_tick();
     // Development check of the BUILD115 exit path (env.txt, .3dsx only; the
@@ -706,13 +890,18 @@ extern "C" void sm64ds_fresh_native_begin(){
          if(!std::strncmp(v,"terminate:",10)){f.kind=1;f.at=unsigned(std::atoi(v+10));}
          else if(!std::strncmp(v,"abort:",6)){f.kind=2;f.at=unsigned(std::atoi(v+6));}
          else if(!std::strncmp(v,"worker:",7)){f.kind=3;f.at=unsigned(std::atoi(v+7));}
+         // BUILD137 watchdog checks: the render worker or the game thread stops for ever.
+         else if(!std::strncmp(v,"hang-render:",12)){f.kind=4;f.at=unsigned(std::atoi(v+12));}
+         else if(!std::strncmp(v,"hang-game:",10)){f.kind=5;f.at=unsigned(std::atoi(v+10));}
          return f;}();
      static unsigned updates=0;
      if(fault.kind&&++updates==fault.at){
-         std::printf("SM64DS_DEV_FAULT: %s at update %u\n",fault.kind==1?"throw std::bad_alloc":fault.kind==2?"abort()":"render worker throws std::bad_alloc",updates);
+         std::printf("SM64DS_DEV_FAULT: %s at update %u\n",fault.kind==1?"throw std::bad_alloc":fault.kind==2?"abort()":fault.kind==3?"render worker throws std::bad_alloc":
+             fault.kind==4?"render worker stops for ever":"game thread spins for ever",updates);
          if(fault.kind==1)throw std::bad_alloc();
          if(fault.kind==2)std::abort();
-         __atomic_store_n(&dev_worker_fault,1,__ATOMIC_RELEASE);
+         if(fault.kind==5){volatile unsigned spin=0;for(;;)++spin;}
+         __atomic_store_n(&dev_worker_fault,fault.kind==4?2:1,__ATOMIC_RELEASE);
      }}
     // A fatal error on another thread: exit from here (see fatal_abort_signal).
     if(__atomic_load_n(&sm64ds_fatal_thread_pending,__ATOMIC_ACQUIRE)){
@@ -723,6 +912,9 @@ extern "C" void sm64ds_fresh_native_begin(){
     runtime->writers=0;
     hooks::menu_oam_trace(runtime->component_capture_frame&&runtime->frames+1==runtime->component_capture_frame);
     if(runtime->provenance)runtime->provenance->reset();
+    buffer_log();
+    sm64ds_watchdog_game_update(sm64ds_render60_scene?sm64ds_render60_scene():unsigned(runtime->scene));
+    starvation_guard(*runtime);
     runtime->dry=dry_decision(*runtime);hooks::set_dry(runtime->dry!=Runtime::Dry::none);
     if(runtime->dry==Runtime::Dry::behind)++runtime->dry_behind;else if(runtime->dry==Runtime::Dry::cap)++runtime->dry_cap;
     else if(runtime->dry==Runtime::Dry::busy)++runtime->dry_busy;
@@ -732,6 +924,46 @@ extern "C" void sm64ds_fresh_native_begin(){
     if(!runtime->open){runtime->fr->seal(false,0);return;}
     if(!hooks::menu_oam_begin()){hooks::end_frame();runtime->open=false;runtime->fr->seal(false,0);return;}
     if(runtime->camera_valid)runtime->producer.projection(runtime->camera);
+}
+extern "C" int __real__ZN11daPicGate_c6RenderEv(void*);
+extern "C" const std::uint16_t* data_ov080_0212775c[];
+extern "C" int __wrap__ZN11daPicGate_c6RenderEv(void* actor){
+    if(!runtime||!runtime->playable)return __real__ZN11daPicGate_c6RenderEv(actor);
+    if(!runtime->open||hooks::dry()||!runtime->camera_valid||!runtime->view_valid)return 1;
+    const auto* self=static_cast<const unsigned char*>(actor);
+    const auto read_word=[](const void* p){std::uint32_t v;std::memcpy(&v,p,4);return v;};
+    const auto param=read_word(self+8);
+    const unsigned picture=(param>>8)&31,mode=(param>>13)&3;
+    if(picture>=19||!data_ov080_0212775c[picture])return 1;
+    const bool grid=mode==1||(mode==0&&(self[0x1b6]||self[0x1b7]));
+    const unsigned cols=grid?self[0x1ba]:2,rows=grid?self[0x1bb]:2;
+    const auto* cells=grid?reinterpret_cast<const unsigned char*>(read_word(self+0x1a0)):self+0x140;
+    if(!cells||cols<2||cols!=rows||cols>30)return 1;
+    const unsigned count=(cols-1)*(rows-1)*4;
+    const auto work=runtime->fr->quad_workspace();
+    if(count>work.capacity)return 1;
+    game::Affine object;std::memcpy(object.value,self+0xd4,sizeof(object.value));
+    QuadState state;state.image=0;state.material.cull=Cull::none;
+    if(mode==1&&picture==7){state.material.blend=Blend::alpha;state.material.tint=0xffffffA5;}
+    if(game::project_pose(game::compose(object,runtime->view),runtime->camera,state.object_to_clip)!=Error::none)return 1;
+    const auto point=[&](unsigned x,unsigned y){
+        const unsigned index=grid?y*cols+x:(y?(x?2:3):x);
+        const auto* cell=cells+index*24;
+        const unsigned shift=mode==1?7:8;
+        const float scale=mode==1?1.f/256:1.f/128;
+        const auto axis=[&](unsigned offset){return float(std::int16_t(read_word(cell+offset)>>shift))*scale;};
+        const auto uv=read_word(cell+20);
+        const float u=mode==1?float(x)/(cols-1):float(std::int16_t(uv))/2048.f;
+        const float v=mode==1?1.f-float(y)/(rows-1):float(std::int16_t(uv>>16))/2048.f;
+        return Vertex{axis(0),axis(4),axis(8),u,v,255,255,255,255};
+    };
+    unsigned i=0;
+    for(unsigned y=0;y+1<rows;++y)for(unsigned x=0;x+1<cols;++x){
+        work.data[i++]=point(x,y);work.data[i++]=point(x+1,y);
+        work.data[i++]=point(x+1,y+1);work.data[i++]=point(x,y+1);
+    }
+    runtime->fr->append_quads(*data_ov080_0212775c[picture],state,work.data,count);
+    return 1;
 }
 extern "C" void sm64ds_fresh_native_projection(const std::int32_t* original){
     if(!runtime)return;
@@ -769,7 +1001,7 @@ extern "C" void sm64ds_fresh_native_writer_probe(std::uint32_t kind,std::uintptr
     if(runtime&&runtime->open&&runtime->provenance)runtime->provenance->record(caller,kind,address,width,1);
 }
 int present_playable();
-void stop_render_worker();
+bool stop_render_worker();
 void finish_interpolated_frame(bool);
 extern "C" void sm64ds_ds_census_report(std::uint64_t);
 namespace {
@@ -794,7 +1026,7 @@ extern "C" int sm64ds_fresh_native_present(int unmigrated_2d){
     }
     if(backgrounds_ok!=Error::none)runtime->fr->invalidate(backgrounds_ok);
     const bool valid=cells_ok&&models_ok&&backgrounds_ok==Error::none;runtime->open=false;++runtime->frames;
-    if(runtime->frames%120==1){const auto& stats=hooks::statistics();
+    if(runtime->frames%120==1&&native_diagnostics::verbose()){const auto& stats=hooks::statistics();
         std::printf("Fresh native frame state: resets=%llu clearKnown=%u clearRGBA=%08lx polygon=%u fogMark=%u\n",
             static_cast<unsigned long long>(runtime->matrix_resets),unsigned(runtime->clear_known),static_cast<unsigned long>(runtime->clear.rgba),
             unsigned(runtime->clear.polygon_id),unsigned(runtime->clear.fog_mark));
@@ -880,7 +1112,7 @@ struct Worker {
     SceneRenderer::Bridge2D endpoint_planes{};
     bool endpoint_pending=false,sync_interpolation=true;
     std::uint64_t midpoint_frames=0,endpoint_frames=0;
-    std::uint64_t image_ticks=0,second_ticks=0; // last job's active cost, read by the game thread when idle
+    std::uint64_t image_ticks=0,image_cpu_ticks=0,second_ticks=0,second_cpu_ticks=0; // last job's cost (wall, CPU), read by the game thread when idle
     std::uint64_t overlapped_frames=0;
     int raised_priority=-1,normal_priority=-1;  // second image's blocked waits (shared core)
     struct Cost {
@@ -991,7 +1223,7 @@ void record_presentation(std::uint64_t start,Error error){
     row.route_2d=(w.job.native_2d?1u:0u)|(w.job.a_has_2d?2u:0u)|(w.job.a?4u:0u)|(w.job.b?8u:0u)|(w.job.native_map?16u:0u)|(w.job.sky_valid?32u:0u);
     w.timeline.push(row);
     w.last_load_ticks=resources.load_ticks;
-    if(error!=Error::none){c={};return;}
+    if(error!=Error::none||!native_diagnostics::verbose()){c={};return;}
     // Menu geometry is routed to the lower LCD. Keep the same interval and
     // spike accounting there, without mixing different scenes/display modes.
     if(c.scene!=w.job.scene||c.screen!=w.job.three||c.geometry!=w.job.geometry){
@@ -1057,7 +1289,9 @@ void run_job(){
             double(r.renderer.backend_metrics().previous_gpu_queue_ms));
 #endif
         record_presentation(start,error);
-        {const auto work=svcGetSystemTick()-start,wait=r.renderer.backend_metrics().wait_ticks;worker->second_ticks=work>wait?work-wait:0;}
+        {const auto& m=r.renderer.backend_metrics();
+         if(overlap&&m.tail_end_tick>start){worker->second_ticks=m.tail_end_tick-start;worker->second_cpu_ticks=m.tail_begin_tick>start?m.tail_begin_tick-start:0;}
+         else{const auto work=svcGetSystemTick()-start;worker->second_ticks=work;worker->second_cpu_ticks=work>m.blocked_ticks?work-m.blocked_ticks:0;}}
         r.store[job.store].frame.release();worker->endpoint_pending=false;job.endpoint_only=false;
         return;
     }
@@ -1153,7 +1387,7 @@ void run_job(){
             if(error==Error::none&&job.keep_history)worker->history->remember(view);else worker->history->reset();
             frame.release();
         }
-        if(job.frame%120==0)std::printf("Native interpolation: midpoint=%llu endpoint=%llu retained=%u blendedParts=%u\n",
+        if(job.frame%120==0&&native_diagnostics::verbose())std::printf("Native interpolation: midpoint=%llu endpoint=%llu retained=%u blendedParts=%u\n",
             (unsigned long long)worker->midpoint_frames,(unsigned long long)worker->endpoint_frames,
             unsigned(worker->endpoint_pending),unsigned(worker->history->blended_parts()));
     }
@@ -1162,7 +1396,7 @@ void run_job(){
     native_lower::gpu_ready.store(error==Error::none&&images[0].image.pixels,std::memory_order_release);
 #endif
     record_presentation(start,error);
-    {const auto work=svcGetSystemTick()-start,wait=r.renderer.backend_metrics().wait_ticks;worker->image_ticks=work>wait?work-wait:0;}
+    {const auto work=svcGetSystemTick()-start,blocked=r.renderer.backend_metrics().blocked_ticks;worker->image_ticks=work;worker->image_cpu_ticks=work>blocked?work-blocked:0;}
     s.update_ticks+=job.update_ticks;
     r.unsubmitted_refusal=error!=Error::none;
     const auto end=svcGetSystemTick();++s.frames;s.present_ticks+=end-start;
@@ -1214,7 +1448,7 @@ void run_job(){
                 if(rgb)linearFree(rgb);}
         }
     }
-    if(s.frames%120==0)report_playable(r,error,job.three);
+    if(s.frames%120==0&&native_diagnostics::verbose())report_playable(r,error,job.three);
     // BUILD134: on the game's core the exact second image cannot wait for the
     // game thread's intermediate display event (the worker would still be
     // drawing and the image was dropped): it follows the interpolated one.
@@ -1229,13 +1463,25 @@ void worker_main(void*){
     for(;;){
         LightEvent_Wait(&w.go);
         if(w.quit)break;
-        if(__atomic_exchange_n(&dev_worker_fault,0,__ATOMIC_ACQ_REL)){std::printf("SM64DS_DEV_FAULT: render worker throws\n");throw std::bad_alloc();}
-        if(w.pending){__sync_synchronize();w.pending=false;run_job();}
+        if(const int fault=__atomic_exchange_n(&dev_worker_fault,0,__ATOMIC_ACQ_REL)){
+            if(fault==2){sm64ds_watchdog_worker_stage(SM64DS_WATCH_WORKER_GPU_WAIT);for(;;)svcSleepThread(1000000000LL);} // hang-render (development)
+            std::printf("SM64DS_DEV_FAULT: render worker throws\n");throw std::bad_alloc();}
+        if(w.pending){__sync_synchronize();w.pending=false;sm64ds_watchdog_worker_stage(SM64DS_WATCH_WORKER_JOB);run_job();sm64ds_watchdog_presented();}
+        sm64ds_watchdog_worker_stage(SM64DS_WATCH_WORKER_IDLE);
         __sync_synchronize();LightEvent_Signal(&w.done);
     }
 }
 void wait_worker(){
     if(worker&&worker->busy){LightEvent_Wait(&worker->done);worker->busy=false;if(worker->ppu_pinned){ntr::ppu_pin_candidate_ways(false);worker->ppu_pinned=false;}}
+}
+void release_host_caches(const char* why){
+    if(!worker)return;
+    wait_worker();
+    const unsigned released=ntr::ppu_release_extra_cache_ways();
+    if(released)std::printf("Native memory: released %u PPU cache way(s) (%s)\n",released,why);
+    // BUILD141: the stores' map descriptors may name these copies; the next
+    // map is prepared, never held from a store.
+    if(ntr::ppu_release_text_snapshots())map_hold_blocked=true;
 }
 bool poll_render_worker(){
     if(!worker||!worker->busy)return true;
@@ -1245,6 +1491,54 @@ bool poll_render_worker(){
     return true;
 }
 bool render_worker_blocks_update(){return worker&&worker->shares_game_core&&!poll_render_worker();}
+// BUILD137: wait for the render worker at most ns nanoseconds. true when it
+// finished (same bookkeeping as poll_render_worker), false on timeout.
+bool wait_worker_for(s64 ns){
+    if(!worker||!worker->busy)return true;
+    if(LightEvent_WaitTimeout(&worker->done,ns)!=0&&!LightEvent_TryWait(&worker->done))return false;
+    __sync_synchronize();worker->busy=false;
+    if(worker->ppu_pinned){ntr::ppu_pin_candidate_ways(false);worker->ppu_pinned=false;}
+    return true;
+}
+// BUILD140: the second image of a pair only waits for the GPU and the LCD
+// once its commands are queued (blocked at a raised priority; the core is
+// free). That tail may overlap the next update: the update is not dropped
+// for it, and its presentation waits for it, bounded.
+constexpr s64 kTailWaitNs=4000000LL;
+bool render_worker_in_tail(){return worker&&worker->busy&&worker->shares_game_core&&runtime&&runtime->renderer.second_tail();}
+// BUILD137: liveness of the render worker on a shared core (Old 3DS). The
+// worker runs on core 0 below the game thread, so it only draws while the
+// game thread waits. On the console the file selector's update alone filled
+// that core: the fixed timeline was always late, the game thread never
+// waited, and the worker never ran again. The white fade-in stayed on screen
+// for ever while the music played (BUILD 52-136; reproduced in Azahar with
+// the CPU clock at 25%: 0.2 FPS). After kStarvedUpdates updates without a
+// new image the game thread now waits for the worker (bounded), and the fixed
+// timeline is postponed by that wait: under overload the game slows down, as
+// the DS did, instead of freezing the picture. The music keeps its tempo
+// (the sequencer runs on the mixer's sample clock). Normal play never gets
+// here: the worker finishes long before three updates have passed.
+constexpr unsigned kStarvedUpdates=3;
+constexpr s64 kStarvationWaitNs=250000000LL;
+void starvation_guard(Runtime& r){
+    if(!worker||!worker->shares_game_core||!worker->busy||r.unpresented<kStarvedUpdates)return;
+    // A GPU marked hung never presents again: waiting would only slow the game.
+    if(sm64ds_gpu_unusable())return;
+    const auto began=svcGetSystemTick();
+    sm64ds_watchdog_game_stage(SM64DS_WATCH_GAME_WAIT_WORKER);
+    const bool done=wait_worker_for(kStarvationWaitNs);
+    sm64ds_watchdog_game_stage(SM64DS_WATCH_GAME_UPDATE);
+    const auto waited=svcGetSystemTick()-began;
+    // A stuck worker times out on every update: keep the first ones and then
+    // one in 40, so the breadcrumbs and the log keep their earlier history.
+    const bool note=done?r.starvation_waits-r.starvation_timeouts<=50:r.starvation_timeouts<3||r.starvation_timeouts%40==0;
+    if(note)sm64ds_watchdog_crumb(done?"vida: espera al render (ms)":"vida: espera agotada (ms)",std::uint32_t(waited/(SYSCLOCK_ARM11/1000)),r.unpresented);
+    sm64ds_native_cadence_pause_ended(began);
+    ++r.starvation_waits;r.starvation_ticks+=waited;if(!done)++r.starvation_timeouts;
+    if(r.starvation_waits<=3||(!done&&(r.starvation_timeouts<=3||r.starvation_timeouts%40==0))||r.starvation_waits%300==0)
+        std::printf("Native liveness: waited for the render worker %.1f ms after %u updates without an image (waits=%llu timeouts=%llu scene=%llu)\n",
+            double(waited)*1000.0/SYSCLOCK_ARM11,r.unpresented,(unsigned long long)r.starvation_waits,(unsigned long long)r.starvation_timeouts,(unsigned long long)r.scene);
+}
 bool start_render_worker(){
     if(worker)return true;
     void* storage=std::malloc(sizeof(Worker));if(!storage)return false;
@@ -1267,7 +1561,7 @@ bool start_render_worker(){
     if(!worker->thread&&core!=0){core=0;used_priority=priority+1;worker->thread=threadCreate(worker_main,nullptr,64*1024,used_priority,core,false);}
     // The game thread runs on core 0 (exheader ideal processor) at this priority.
     worker->shares_game_core=core==0&&used_priority>priority;worker->core=core;
-    if(worker->shares_game_core){worker->raised_priority=priority-1;worker->normal_priority=used_priority;}
+    if(worker->shares_game_core){worker->raised_priority=priority-1;worker->normal_priority=used_priority;runtime->renderer.set_lock_priority(priority-1);}
     std::printf("Fresh native render worker: core=%d created=%u sharesGameCore=%u audioCore=%d\n",core,unsigned(worker->thread!=nullptr),
         unsigned(worker->shares_game_core),audio_core_used.load(std::memory_order_relaxed));
     if(!worker->thread){
@@ -1280,17 +1574,25 @@ bool start_render_worker(){
     return true;
 }
 }
-void stop_render_worker(){
-    if(!worker)return;
-    finish_interpolated_frame(true);wait_worker();worker->quit=true;__sync_synchronize();LightEvent_Signal(&worker->go);
-    threadJoin(worker->thread,U64_MAX);threadFree(worker->thread);worker->thread=nullptr;
+// BUILD137: bounded. A worker stuck on the GPU must not turn Close (HOME) or
+// an exit into another endless wait. Returns false when the worker did not
+// stop; its thread is then left to process exit (never freed while it runs).
+bool stop_render_worker(){
+    if(!worker)return true;
+    bool idle=wait_worker_for(500000000LL);
+    if(idle&&worker->endpoint_pending){runtime->renderer.clear_second_tail();worker->job.endpoint_only=true;worker->busy=true;worker->pending=true;
+        __sync_synchronize();LightEvent_Signal(&worker->go);idle=wait_worker_for(500000000LL);}
+    worker->quit=true;__sync_synchronize();LightEvent_Signal(&worker->go);
+    if(!idle||R_FAILED(threadJoin(worker->thread,500000000LL))){
+        std::printf("Fresh native shutdown: render worker did not stop (left to process exit)\n");return false;}
+    threadFree(worker->thread);worker->thread=nullptr;return true;
 }
 
 void finish_interpolated_frame(bool wait){
     if(!worker)return;
     if(wait)wait_worker();else if(!poll_render_worker())return;
     if(worker->endpoint_pending){
-        worker->job.endpoint_only=true;worker->busy=true;worker->pending=true;
+        runtime->renderer.clear_second_tail();worker->job.endpoint_only=true;worker->busy=true;worker->pending=true;
         __sync_synchronize();LightEvent_Signal(&worker->go);
         if(wait)wait_worker();
     }
@@ -1304,7 +1606,28 @@ void lifecycle_hook(APT_HookType type,void*){
     if(begin){
         if(!r.lifecycle_pauses){
             r.lifecycle_pause_tick=svcGetSystemTick();
-            finish_interpolated_frame(true);r.renderer.finish();
+            sm64ds_watchdog_host_stage(SM64DS_WATCH_HOST_LIFECYCLE);
+            sm64ds_watchdog_crumb(begin==1?"HOME: suspension":"reposo: entrada",0,0);
+            // BUILD137: bounded. HOME, POWER and sleep must never wait for ever
+            // on a render job or the GPU (they did: LightEvent_Wait and
+            // gxCmdQueueWait(-1) inside C3D_FrameBegin). A healthy worker is
+            // idle within one job; a stuck one is left to the watchdog report
+            // and the system still gets the console. An owed exact second
+            // image is dropped instead of drawn now.
+            // 3 s: longer than the 2 s GX wait bound, so a worker stuck on the
+            // GPU returns (its frame fails) before this gives up.
+            const bool idle=wait_worker_for(3000000000LL);
+            if(idle&&worker&&worker->endpoint_pending){
+                r.store[worker->job.store].frame.release();worker->endpoint_pending=false;worker->history->reset();r.recovery_cut=true;
+            }
+            if(idle)r.renderer.finish(); // GPU waits bounded by __wrap_gxCmdQueueWait (hang_watchdog.cpp)
+            else{
+                // The worker still runs: it must not issue GX work while the
+                // system owns the GPU (the backend refuses until resume).
+                sm64ds_gpu_block(1);r.lifecycle_gpu_blocked=true;
+                sm64ds_watchdog_crumb("HOME: render ocupado, GPU bloqueada",0,0);
+            }
+            sm64ds_watchdog_pause(1);
         }
         r.lifecycle_pauses|=begin;
     }else if(end){
@@ -1312,6 +1635,8 @@ void lifecycle_hook(APT_HookType type,void*){
         if(!r.lifecycle_pauses&&r.lifecycle_pause_tick){
             sm64ds_native_cadence_pause_ended(r.lifecycle_pause_tick);
             r.lifecycle_pause_tick=0;r.stats.last_tick=0;r.stats.begin_tick=0;
+            if(r.lifecycle_gpu_blocked){r.lifecycle_gpu_blocked=false;sm64ds_gpu_block(0);}
+            sm64ds_watchdog_pause(0);sm64ds_watchdog_crumb("HOME/reposo: vuelta",0,0);
         }
     }
 }
@@ -1346,6 +1671,7 @@ int present_playable(){
     auto& r=*runtime;
     static bool worker_ready=start_render_worker();
     if(!worker_ready)return 0;
+    sm64ds_watchdog_start(); // BUILD137 hang watchdog (idempotent)
     const auto start=svcGetSystemTick();
     auto& frame=*r.fr;
     const bool capture_head=head_canvas&&head_canvas->requested;
@@ -1365,8 +1691,9 @@ int present_playable(){
         if(frame.seal(true,0)==Error::none)frame.release();
         ++r.unpresented;r.recovery_cut=true;return 1;
     }
+    std::uint64_t phase_tick[8]{start};
     if(exact_capture)wait_worker();
-    else if(!poll_render_worker()){
+    else if(!poll_render_worker()&&!(render_worker_in_tail()&&wait_worker_for(kTailWaitNs))){
         if(frame.seal(true,0)==Error::none)frame.release();
         ++r.recovery_skips;r.recovery_cut=true;++r.unpresented;++r.busy_drops;
         if(worker->shares_game_core&&worker->job.interpolate)interpolation_missed();
@@ -1374,10 +1701,14 @@ int present_playable(){
     }
     if(worker->shares_game_core){auto& b=interpolation_budget;
         // The finished job's measured cost (the worker is idle here).
-        if(worker->image_ticks)b.image_ticks=b.image_ticks?(b.image_ticks*3+worker->image_ticks)/4:worker->image_ticks;
-        if(worker->second_ticks)b.second_ticks=b.second_ticks?(b.second_ticks*3+worker->second_ticks)/4:worker->second_ticks;
-        worker->image_ticks=worker->second_ticks=0;
-        if(worker->job.interpolate&&++b.streak>=60){b.streak=0;b.backoff=30;}
+        if(worker->image_ticks){
+            b.image_ticks=b.image_ticks?(b.image_ticks*3+worker->image_ticks)/4:worker->image_ticks;
+            b.image_cpu_ticks=b.image_cpu_ticks?(b.image_cpu_ticks*3+worker->image_cpu_ticks)/4:worker->image_cpu_ticks;}
+        if(worker->second_ticks){const bool fresh=b.second_ticks&&b.second_age<120;
+            b.second_ticks=fresh?(b.second_ticks*3+worker->second_ticks)/4:worker->second_ticks;
+            b.second_cpu_ticks=fresh?(b.second_cpu_ticks*3+worker->second_cpu_ticks)/4:worker->second_cpu_ticks;b.second_age=0;}
+        worker->image_ticks=worker->image_cpu_ticks=worker->second_ticks=worker->second_cpu_ticks=0;
+        if(worker->job.interpolate&&++b.streak>=60){b.streak=0;b.backoff=8;}
     }
     if(worker->endpoint_pending){
         // A newer simulation capture supersedes an unsubmitted endpoint.
@@ -1386,10 +1717,12 @@ int present_playable(){
         worker->history->reset();r.recovery_cut=true;
     }
     // DS 2D candidates (game memory) are read here, on the game thread.
+    phase_tick[1]=svcGetSystemTick();
     const auto disp=std::uint32_t(ntr::io_read(0x04000000,4));
     const Screen three=main_lcd();
     const auto dialogue=hooks::capture_dialogue(frame,three);
     if(dialogue!=Error::none)frame.invalidate(dialogue);
+    phase_tick[2]=svcGetSystemTick();
     if(r.native_menu){const auto& effects=hooks::menu_display_snapshot().effect;
         for(std::size_t i=0;i<frame.captured_images();++i){auto& image=r.store[r.cap].images[i];
             const auto& effect=effects[image.screen==three?0:1];
@@ -1399,6 +1732,7 @@ int present_playable(){
     }
     if(fog_experiment&&r.camera_valid)frame.fog(read_fog(),r.camera);
     const auto seal=frame.seal(true,0);
+    phase_tick[3]=svcGetSystemTick();
     const bool shown=((disp>>16)&3)==1&&!(disp&0x80);
     const bool geometry=shown&&(disp&8)&&(disp&0x100);
     const bool a_has_2d=!shown||((disp>>8)&0x1e)||!(disp&8);
@@ -1412,6 +1746,7 @@ int present_playable(){
         if(r.timings)note_engine_a_prepare(r.frames,r.scene,!a_cached||last_geometry!=geometry);
         a.emplace(ntr::ppu_prepare_candidates_cached(ntr::ENGINE_A));
     }
+    phase_tick[4]=svcGetSystemTick();
     // Authored PICA laboratory: 60 transforms, exact sharp-image LCD parity.
     static const bool gpu_map=[](){const auto* e=std::getenv("SM64DS_NATIVE_GPU_MAP");return !e||*e!='0';}();
     // BUILD123: one failed GPU map publication disabled the GPU map for the
@@ -1426,21 +1761,102 @@ int present_playable(){
             std::printf("Native map: GPU path retry %u\n",worker->gpu_map_retries);
         }
     }
+    const bool intro=three==Screen::top && sm64ds_opening_map();
+    if(intro!=dialogue_window_view::intro_map.load(std::memory_order_relaxed)){
+        dialogue_window_view::intro_map.store(intro,std::memory_order_relaxed);map_hold_blocked=true;b_cached=false;
+    }
     bool native_map=false;
-    if(gpu_map&&!worker->gpu_map_failed.load(std::memory_order_acquire)&&!r.native_menu&&three==Screen::top){
+    // BUILD139: the same 10 Hz limit for an expensive GPU map (the opening's
+    // rotating map with translucent clouds rasterized its foreground on the
+    // CPU every update): the previous capture's map is reused (copied from
+    // the sealed store the worker only reads) for up to two updates.
+    static unsigned map_hold=0;static bool map_previous=false;static std::uint64_t map_scene=0;
+    if(map_scene!=r.scene||map_hold_blocked){map_scene=r.scene;map_hold=0;map_previous=false;map_hold_blocked=false;}
+    const bool hold_layers=r.store[r.cap^1u].map.layers==0||(r.store[r.cap].map_behind&&r.store[r.cap^1u].map_behind);
+    if(gpu_map&&!worker->gpu_map_failed.load(std::memory_order_acquire)&&!r.native_menu&&three==Screen::top&&
+       map_hold&&map_previous&&valid(r.store[r.cap^1u].map)&&hold_layers&&!capture_head&&!exact_image_owed(r)){
+        --map_hold;auto& store=r.store[r.cap];const auto& previous=r.store[r.cap^1u];
+        store.map_foreground=previous.map_foreground;store.map=previous.map;store.map.foreground=&store.map_foreground.px[0][0];
+        // BUILD140: this buffer now holds the other one's pixels; its own
+        // restore state (overlay, OBJ boxes, serial) must not be reused.
+        // BUILD142: it takes the other buffer's state instead (forgetting it
+        // made every preparation after a held image a full redraw).
+        ntr::ppu_native_affine_clone(store.map_foreground,previous.map_foreground);
+        if(store.map.layers){*store.map_behind=*previous.map_behind;store.map.behind=&store.map_behind->px[0][0];
+            ntr::ppu_native_affine_clone(*store.map_behind,*previous.map_behind);}
+        native_map=true;
+    }else if(gpu_map&&!worker->gpu_map_failed.load(std::memory_order_acquire)&&!r.native_menu&&three==Screen::top){
         auto& store=r.store[r.cap];ntr::PpuGpuAffineLayer map{};
-        native_map=ntr::ppu_prepare_native_affine(ntr::ENGINE_B,store.map_foreground,map);
+        // BUILD141: a behind plane lets the PPU hand its text layers to the GPU.
+        if(!store.map_behind){static bool failed=false;
+            if(!failed&&(store.map_behind=static_cast<ntr::Framebuffer*>(linearAlloc(sizeof(ntr::Framebuffer)))))std::memset(static_cast<void*>(store.map_behind),0,sizeof(ntr::Framebuffer));
+            else failed=true;}
+        const auto map_start=svcGetSystemTick();
+        native_map=ntr::ppu_prepare_native_affine(ntr::ENGINE_B,store.map_foreground,map,store.map_behind);
+        const auto map_ticks=svcGetSystemTick()-map_start;
+        map_hold=native_map&&map_ticks>SYSCLOCK_ARM11/125?2u:native_map&&map_ticks>SYSCLOCK_ARM11/200?1u:0u;
+        // BUILD141: a cheap map (GPU text layers) is refreshed every update,
+        // unless the update and its image already fill the 30 Hz period on
+        // the shared core: then the map keeps BUILD 139's 10 Hz, which costs
+        // the worker one plane upload in three.
+        if(native_map&&map_hold<2&&worker->shares_game_core){
+            constexpr std::uint64_t period=std::uint64_t(SYSCLOCK_ARM11)*560190ull*2ull/33513982ull;
+            const auto& b=interpolation_budget;
+            // 75 %: the measured update and image leave out the 2D map itself
+            // and the waits between them (at 50 % clock, 28 ms measured
+            // already missed the period: images every 2-3-3 refreshes).
+            if(b.image_cpu_ticks&&last_update_ticks+b.image_cpu_ticks>period*75/100)map_hold=2;
+        }
         if(native_map){store.map={map.raster,&store.map_foreground.px[0][0],map.raster_generation,
             unsigned(map.width),unsigned(map.height),map.ref_x,map.ref_y,map.pa,map.pb,map.pc,map.pd,map.backdrop,map.wrap};
             // BUILD129: OBJ bands + overlay base, so the upload compares only those.
             const std::uint32_t* base=nullptr;std::uint64_t base_generation=0;
             store.map.foreground_bands=ntr::ppu_native_affine_bands(store.map_foreground,&base,&base_generation);
-            store.map.foreground_base=base;store.map.foreground_base_generation=base_generation;}
+            store.map.foreground_base=base;store.map.foreground_base_generation=base_generation;
+            static std::uint64_t map_serial=0;store.map.serial=++map_serial;
+            if(map.text_count&&store.map_behind){
+                for(unsigned k=0;k<map.text_count;++k){const auto& t=map.text[k];
+                    store.map.layer[k]={t.raster,t.key,unsigned(t.width),unsigned(t.height),t.hofs,t.vofs};}
+                store.map.layers=map.text_count;store.map.behind=&store.map_behind->px[0][0];
+            }}
     }
+    map_previous=native_map;
+    phase_tick[5]=svcGetSystemTick();
     // Changed maps, HUD and window animation update at the game cadence.
-    if(!native_map&&!r.native_menu&&(!b_cached||!ntr::ppu_prepared_inputs_unchanged(ntr::ENGINE_B)))b.emplace(ntr::ppu_prepare_candidates_cached(ntr::ENGINE_B));
+    // BUILD139: engine B never carries the 3D image. When its CPU preparation
+    // is expensive (the opening's rotating map under translucent clouds: a
+    // full raster every update, 27 ms on the Old 3DS console), it is redone
+    // at most every third update and the last prepared image stays shown in
+    // between; ordinary scenes prepare it in about 1 ms and are unaffected.
+    // Exact captures (dumps, title canvas) always prepare.
+    static unsigned b_hold=0;
+    const bool b_changed=!native_map&&!r.native_menu&&(!b_cached||!ntr::ppu_prepared_inputs_unchanged(ntr::ENGINE_B));
+    if(b_changed&&b_cached&&b_hold&&!capture_head&&!exact_image_owed(r))--b_hold;
+    else if(b_changed){
+        const auto b_start=svcGetSystemTick();
+        b.emplace(ntr::ppu_prepare_candidates_cached(ntr::ENGINE_B));
+        const auto b_ticks=svcGetSystemTick()-b_start;
+        b_hold=b_ticks>SYSCLOCK_ARM11/125?2u:b_ticks>SYSCLOCK_ARM11/200?1u:0u; // over 8 ms: 10 Hz; over 5 ms: 15 Hz
+    }
     a_cached=!r.native_menu&&needs_a;b_cached=!r.native_menu&&!native_map;last_geometry=geometry;
-    if(r.frames%120==0)std::printf("Native 2D map: frame=%llu gpu=%u fallback=%u\n",(unsigned long long)r.frames,unsigned(native_map),unsigned(!r.native_menu&&!native_map));
+    phase_tick[6]=svcGetSystemTick();
+    if(r.frames%120==0&&native_diagnostics::verbose())std::printf("Native 2D map: frame=%llu gpu=%u fallback=%u\n",(unsigned long long)r.frames,unsigned(native_map),unsigned(!r.native_menu&&!native_map));
+    // BUILD139: where the game thread's 2D preparation goes (the opening's
+    // top screen spent 27 ms per update on the console). Diagnostics only.
+    if(r.timings){
+        static bool clock_set=false;if(!clock_set){ntr::ppu_prepare_profile_clock([]()->double{return double(svcGetSystemTick())*1000.0/double(SYSCLOCK_ARM11);});clock_set=true;}
+        static unsigned profiled=0;if(++profiled%60==0&&native_diagnostics::verbose()){
+            for(auto eng:{ntr::ENGINE_A,ntr::ENGINE_B}){const auto p=ntr::ppu_prepare_profile_read(eng,true);
+                std::printf("Native 2D prepare engine=%u calls=%llu ms: windows=%.2f bg=%.2f objects=%.2f resolve=%.2f raster=%.2f/%llu cached=%.2f bgOnly=%.2f detail=%.2f,%.2f,%.2f,%.2f\n",
+                    unsigned(eng),(unsigned long long)p.calls,p.windows,p.bg,p.objects,p.resolve,p.raster,(unsigned long long)p.raster_calls,p.cached,p.bg_only,
+                    p.detail[0],p.detail[1],p.detail[2],p.detail[3]);}
+            std::uint64_t reuse[16]{};ntr::ppu_bg_reuse_stats(reuse);std::uint64_t full=0,tiles=0,hits=0,direct=0;ntr::ppu_layer_cache_stats(full,tiles,hits,direct);
+            std::printf("Native 2D reuse: rows=%llu dirtyRows=%llu fullRasters=%llu scrollReuses=%llu refusals=%llu,%llu,%llu,%llu,%llu,%llu layerCache full=%llu tiles=%llu hits=%llu direct=%llu\n",
+                (unsigned long long)reuse[0],(unsigned long long)reuse[1],(unsigned long long)reuse[2],(unsigned long long)reuse[3],
+                (unsigned long long)reuse[4],(unsigned long long)reuse[5],(unsigned long long)reuse[6],(unsigned long long)reuse[7],(unsigned long long)reuse[8],(unsigned long long)reuse[9],
+                (unsigned long long)full,(unsigned long long)tiles,(unsigned long long)hits,(unsigned long long)direct);
+        }
+    }
     const int brightness_three=master_brightness(0x0400006c),brightness_other=master_brightness(0x0400106c);
     // Obtain the background before animated OBJ insertion. The final two
     // candidates can both be foreground, hiding the sky for a single pixel
@@ -1458,6 +1874,16 @@ int present_playable(){
         }}
     }
     const auto prepared=svcGetSystemTick();
+    phase_tick[7]=prepared;
+    for(unsigned k=0;k<7;++k)game_phases.ticks[k]+=phase_tick[k+1]-phase_tick[k];
+    ++game_phases.calls;
+    {static GamePhases mark;static std::uint32_t logged=0;
+     if(game_phases.calls<mark.calls)mark=GamePhases{}; // the report window restarted
+     if(native_diagnostics::verbose()&&++logged>=600){logged=0;const double n=double(game_phases.calls-mark.calls);
+        if(n>0){const double ms=1000.0/double(SYSCLOCK_ARM11);const auto& g=game_phases.ticks;const auto& m=mark.ticks;
+            std::printf("Native present phases (ms/update over %u): wait=%.2f dialogue=%.2f seal=%.2f engineA=%.2f map=%.2f engineB=%.2f sky=%.2f\n",
+                unsigned(n),(g[0]-m[0])*ms/n,(g[1]-m[1])*ms/n,(g[2]-m[2])*ms/n,(g[3]-m[3])*ms/n,(g[4]-m[4])*ms/n,(g[5]-m[5])*ms/n,(g[6]-m[6])*ms/n);}
+        mark=game_phases;}}
     native_diagnostics::trace.record(ntr::rt_frame(),unsigned(r.serial),unsigned(r.scene));
     // BUILD134: the PPU snapshots advanced above but this image is not sent:
     // prepare both engines again next time (a stale top 2D would stay otherwise).
@@ -1470,7 +1896,7 @@ int present_playable(){
         for(unsigned e=0;e<2;++e)if(effects[e].known&&effects[e].mode==hooks::DisplayEffect::brightness&&effects[e].first==63)
             job.tone[(e==0?three:(three==Screen::top?Screen::bottom:Screen::top))==Screen::top?0:1]=effects[e].amount;
         if(effects[0].known&&effects[0].mode==hooks::DisplayEffect::brightness&&effects[0].first!=63&&(effects[0].first&1))job.geometry_tone=effects[0].amount;
-        if(r.frames%120==0){const auto& cells=hooks::menu_oam_statistics();
+        if(r.frames%120==0&&native_diagnostics::verbose()){const auto& cells=hooks::menu_oam_statistics();
             std::printf("Native menu coverage: frame=%llu images=%u objCalls=%llu objCaptured=%llu objFailures=%llu effectMain=%u/%u/%d effectSub=%u/%u/%d complete=0\n",
                 (unsigned long long)r.frames,unsigned(frame.captured_images()),(unsigned long long)cells.calls,
                 (unsigned long long)cells.captured,(unsigned long long)cells.failures,
@@ -1494,17 +1920,18 @@ int present_playable(){
     job.sky_valid=sky_valid;
     job.producer_stats=hooks::statistics();job.skin_ticks=hooks::skin_ticks;job.writers=r.writers;
     job.update_ticks=(r.stats.begin_tick?start-r.stats.begin_tick:0)+(prepared-start);
+    last_update_ticks=job.update_ticks;
     // After update_ticks is known: on a shared core the pair must fit.
     if(job.interpolate&&worker->shares_game_core&&!interpolation_fits(job.update_ticks))job.interpolate=false;
     job.source_2d_ticks=prepared-start;job.scene=r.scene;job.frame=r.frames;
-    if(r.frames%120==0){sm64ds_ds_census_report(r.frames);const auto& text=hooks::dialogue_statistics();
+    if(r.frames%120==0&&native_diagnostics::verbose()){sm64ds_ds_census_report(r.frames);const auto& text=hooks::dialogue_statistics();
         std::printf("Native dialogue: starts=%llu characters=%llu lines=%llu scrollSteps=%llu frames=%llu failures=%llu gpuWindow=%u\n",
             (unsigned long long)text.starts,(unsigned long long)text.characters,(unsigned long long)text.lines,
             (unsigned long long)text.scroll_steps,(unsigned long long)text.frames,(unsigned long long)text.failures,unsigned(job.dialogue_window.owned));
     }
     job.selector_language=r.selector_language;r.selector_language=6;
     r.presented_event=display_event;r.presented_once=true;r.unpresented=0;
-    worker->busy=true;worker->ppu_pinned=!r.native_menu;if(worker->ppu_pinned)ntr::ppu_pin_candidate_ways(true);worker->pending=true;__sync_synchronize();LightEvent_Signal(&worker->go);
+    r.renderer.clear_second_tail();worker->busy=true;worker->ppu_pinned=!r.native_menu;if(worker->ppu_pinned)ntr::ppu_pin_candidate_ways(true);worker->pending=true;__sync_synchronize();LightEvent_Signal(&worker->go);
     if(capture_head)wait_worker(); // transition must finish before the game remaps its canvas
     // Next capture goes into the other store (the worker reads this one).
     r.cap^=1u;r.fr=&r.store[r.cap].frame;r.producer.set_frame(*r.fr);
@@ -1523,6 +1950,15 @@ void report_playable(Runtime& r,Error error,Screen three){
     std::printf("PLAYABLE timing ms/frame: update=%.2f models=%.2f skin=%.2f bridge2D=%.2f draw=%.2f gpuWait=%.2f upload=%.2f submit=%.2f (update on game thread; the rest on the render worker; timings need SM64DS_FRESH_NATIVE_PROFILE=1)\n",
         s.update_ticks*ms/120,(hooks_stats.producer_ticks-s.model_mark)*ms/120,(job.skin_ticks-s.skin_mark)*ms/120,s.bridge_ticks*ms/120,
         s.draw_ticks*ms/120,s.wait_ticks*ms/120,s.upload_ticks*ms/120,s.submit_ticks*ms/120);
+    {namespace ad=enhance::audio_diagnostics;static std::uint32_t last_wait=0,last_waits=0,last_mix=0,last_late=0;
+     const auto wait=ad::timing.game_wait_us.load(std::memory_order_relaxed),waits=ad::timing.game_waits.load(std::memory_order_relaxed);
+     const auto mix=ad::timing.mix_us.load(std::memory_order_relaxed),late=ad::timing.late_wait_us.load(std::memory_order_relaxed);
+     auto& h=menu_hook_ticks;const auto x=[](std::atomic<std::uint64_t>& v){return double(v.exchange(0,std::memory_order_relaxed));};
+     const double cell=x(h.cell),sprite=x(h.sprite),stroke=x(h.stroke),grid=x(h.grid);const unsigned grids=h.grids.exchange(0,std::memory_order_relaxed);
+     std::printf("PLAYABLE game hooks ms/frame: menuCells=%.2f menuSprites=%.2f menuStrokes=%.2f menuGrid=%.2f grids=%u audioGameWait=%.2f waits=%u audioLateWait=%.2f mixer=%.2f audioUnderrunsTotal=%lu liveness=%llu/%llu\n",
+        cell*ms/120,sprite*ms/120,stroke*ms/120,grid*ms/120,grids,(wait-last_wait)/1000.0/120,unsigned(waits-last_waits),(late-last_late)/1000.0/120,(mix-last_mix)/1000.0/120,
+        (unsigned long)ad::timing.underruns.load(std::memory_order_relaxed),(unsigned long long)r.starvation_waits,(unsigned long long)r.starvation_timeouts);
+     last_wait=wait;last_waits=waits;last_mix=mix;last_late=late;}
     std::printf("PLAYABLE gpu work per frame: draws=%llu matrixUploads=%llu lightRows=%llu materialBinds=%llu shaderBinds=%llu pipelineChanges=%llu meshBinds=%llu\n",
         (unsigned long long)(s.draws/120),(unsigned long long)(s.matrices/120),(unsigned long long)(s.light_rows/120),(unsigned long long)(s.materials/120),
         (unsigned long long)(s.shader_binds/120),(unsigned long long)(s.pipeline/120),(unsigned long long)(s.mesh_binds/120));
@@ -1546,8 +1982,13 @@ extern "C" void sm64ds_fresh_native_shutdown(){
     if(runtime->graphics)aptUnhook(&runtime->lifecycle_cookie);
     if(runtime->open){hooks::end_frame();hooks::menu_oam_end();runtime->fr->seal(false,0);runtime->open=false;}
     hooks::activate(false);
-    stop_render_worker();
-    if(runtime->graphics){const auto error=runtime->renderer.shutdown();
+    const bool stopped=stop_render_worker();
+    // A worker that did not stop still uses the runtime, the pose history and
+    // citro3d: the normal teardown would free them under it. End the process
+    // here instead (the kernel and GSP reclaim threads and rights).
+    if(!stopped){std::printf("Fresh native shutdown: ending the process without teardown\n");std::fflush(stdout);sm64ds_watchdog_emergency_exit();}
+    // A hung GPU may still write its targets: skip the citro3d teardown.
+    if(runtime->graphics&&!sm64ds_gpu_unusable()){const auto error=runtime->renderer.shutdown();
         std::printf("Fresh native shutdown: %s ownedGpuBytes=%u outputVRAM=%u\n",describe(error),unsigned(runtime->renderer.backend_metrics().owned_gpu_bytes()),unsigned(runtime->renderer.output_vram_bytes()));}
     std::printf("Fresh native total: frames=%llu refused=%llu submitted=%llu\n",static_cast<unsigned long long>(runtime->frames),
         static_cast<unsigned long long>(runtime->refused),static_cast<unsigned long long>(runtime->renderer.metrics().frames));
@@ -1655,14 +2096,23 @@ extern "C" void __wrap_irrstCstickRead(circlePosition* out){
 }
 
 
+// BUILD139: a report or dump freezes the whole game, music included
+// (player_present.cpp, generated by tools/prepare_integrated_native_renderer.py).
+extern "C" void sm64ds_audio_freeze(int) __attribute__((weak));
 extern "C" int sm64ds_fresh_native_diagnostic_begin(){
     if(!runtime||!runtime->graphics)return 0;
+    if(sm64ds_audio_freeze)sm64ds_audio_freeze(1);
     runtime->diagnostic_pause_tick=svcGetSystemTick();
     finish_interpolated_frame(true);
     std::printf("Native diagnostic drained: frame=%llu scene=%llu linearFree=%u appFree=%u\n",
         (unsigned long long)runtime->frames,(unsigned long long)runtime->scene,unsigned(linearSpaceFree()),
         unsigned(osGetMemRegionFree(MEMREGION_APPLICATION)));
-    return runtime->renderer.finish()==Error::none;
+    const bool finished=runtime->renderer.finish()==Error::none;
+    // BUILD137: the watchdog sleeps through the SD work of a report or dump
+    // (diagnostic_end resumes it), but only after the drain above: a render
+    // or GPU hang during the drain is still reported.
+    sm64ds_watchdog_report_pause(1);
+    return finished;
 }
 extern "C" int sm64ds_fresh_native_diagnostic_capture(const char* directory){
     if(!runtime||!worker||!directory||!*directory||std::strlen(directory)>180)return 0;
@@ -1670,20 +2120,20 @@ extern "C" int sm64ds_fresh_native_diagnostic_capture(const char* directory){
     // resume until this call returns; retained arrays and GPU targets are stable.
     char path[224];bool okay=true;
     std::snprintf(path,sizeof path,"%s/native-frames.csv",directory);
-    if(FILE* file=std::fopen(path,"wb")){
+    if(FILE* file=graphics_report::open_member(path,"wb")){
         okay=worker->timeline.write_csv(file);if(std::fclose(file)!=0)okay=false;
     }else okay=false;
     bool component=false;
     if(worker->diagnostic_view.serial){
         std::snprintf(path,sizeof path,"%s/native-components.json",directory);
-        if(FILE* file=std::fopen(path,"wb")){
+        if(FILE* file=graphics_report::open_member(path,"wb")){
             component=write_component_capture(file,worker->diagnostic_view,
                 {worker->job.frame,worker->job.writers,runtime->clear_known,!worker->job.native_2d});
             if(std::fclose(file)!=0)component=false;
         }
     }
     std::snprintf(path,sizeof path,"%s/native-display.json",directory);
-    if(FILE* file=std::fopen(path,"wb")){
+    if(FILE* file=graphics_report::open_member(path,"wb")){
         const bool written=hooks::write_menu_display_capture(file,runtime->frames);
         if(std::fclose(file)!=0||!written)okay=false;
     }else okay=false;
@@ -1697,7 +2147,7 @@ extern "C" int sm64ds_fresh_native_diagnostic_capture(const char* directory){
             for(std::size_t n=0;n<bytes;++n)checksum=(checksum^data[n])*16777619u;
             hashes[side]=checksum;
             std::snprintf(path,sizeof path,"%s/native-%s.rgb",directory,side?"bottom":"top");
-            if(FILE* file=std::fopen(path,"wb")){
+            if(FILE* file=graphics_report::open_member(path,"wb")){
                 captured[side]=std::fwrite(data,1,bytes,file)==bytes;
                 if(std::fclose(file)!=0)captured[side]=false;
             }
@@ -1706,7 +2156,7 @@ extern "C" int sm64ds_fresh_native_diagnostic_capture(const char* directory){
     }
     const auto& gpu=runtime->renderer.backend_metrics();const auto& banks=runtime->renderer.metrics();
     std::snprintf(path,sizeof path,"%s/native-renderer.json",directory);
-    if(FILE* file=std::fopen(path,"wb")){
+    if(FILE* file=graphics_report::open_member(path,"wb")){
         const int written=std::fprintf(file,
             "{\"format\":\"SM64_NATIVE_DIAGNOSTIC_1\",\"build\":%u,\"tick_frequency\":%u,\"frame\":%llu,\"scene\":%llu,"
             "\"worker_drained\":true,\"gpu_os_dsp_atomic\":false,\"timings\":%s,\"native_menu\":%s,\"component\":%s,"
@@ -1728,6 +2178,8 @@ extern "C" int sm64ds_fresh_native_diagnostic_capture(const char* directory){
 }
 extern "C" void sm64ds_fresh_native_diagnostic_end(){
     if(!runtime)return;
+    sm64ds_watchdog_report_pause(0); // no-op when begin returned before pausing
+    if(runtime->graphics&&sm64ds_audio_freeze)sm64ds_audio_freeze(0);
     sm64ds_native_cadence_pause_ended(runtime->diagnostic_pause_tick);runtime->diagnostic_pause_tick=0;
     runtime->stats.last_tick=0;if(worker)worker->cost={};
 }
@@ -1782,6 +2234,7 @@ void audio_counters(std::uint32_t out[10]){
 }
 extern "C" void sm64ds_fresh_native_audio_window(void){
     audio_window.tick=svcGetSystemTick();audio_counters(audio_window.at);
+    game_phases=GamePhases{};
     enhance::audio_diagnostics::timing.chunk_max_us.exchange(0,std::memory_order_relaxed);
     enhance::audio_diagnostics::timing.game_wait_max_us.exchange(0,std::memory_order_relaxed);
 }
@@ -1846,6 +2299,9 @@ extern "C" int sm64ds_fresh_native_test_report(const char* directory,std::uint64
             count?count+1:0,endpoints,errors,fps,count?span/count:0,pct(50),pct(95),pct(99),count?intervals[count-1]:0,over33,over17);
         std::fprintf(f,"\n== hilo del juego (por actualizacion, ms) ==\nactualizacion media=%.2f max=%.2f   (logica DS + captura + 2D CPU)\npreparacion_2d media=%.2f max=%.2f\nproductores_3d media=%.2f max=%.2f\nskin media=%.2f max=%.2f\n",
             update.mean(),update.max,source.mean(),source.max,producer.mean(),producer.max,skin.mean(),skin.max);
+        {const double n=game_phases.calls?double(game_phases.calls):1.0;const auto& g=game_phases.ticks;
+         std::fprintf(f,"fases_presentacion (%u, ms): espera_render=%.2f dialogo=%.2f sellado_3d=%.2f motor_a=%.2f mapa=%.2f motor_b=%.2f cielo=%.2f\n",
+            unsigned(game_phases.calls),g[0]*ms/n,g[1]*ms/n,g[2]*ms/n,g[3]*ms/n,g[4]*ms/n,g[5]*ms/n,g[6]*ms/n);}
         std::fprintf(f,"\n== hilo de render (por imagen, ms) ==\ntrabajo media=%.2f max=%.2f\ncomposicion_2d media=%.2f max=%.2f\ndibujo media=%.2f max=%.2f\n  espera_gpu media=%.2f max=%.2f\n  subida media=%.2f max=%.2f\n  envio media=%.2f max=%.2f\ngpu_anterior media=%.2f max=%.2f\ncarga_bancos total=%.1f\n",
             work.mean(),work.max,bridge_s.mean(),bridge_s.max,draw_s.mean(),draw_s.max,wait.mean(),wait.max,upload.mean(),upload.max,
             submit.mean(),submit.max,gpu.mean(),gpu.max,double(load_ticks)*ms);
@@ -1900,10 +2356,10 @@ extern "C" int sm64ds_fresh_native_test_report(const char* directory,std::uint64
                 const auto overlapped=overlapped_now-overlapped_last;overlapped_last=overlapped_now;
                 std::uint64_t id[5];for(unsigned i=0;i<5;++i){id[i]=inow[i]-ilast[i];ilast[i]=inow[i];}
                 const double tick_ms=1000.0/double(SYSCLOCK_ARM11);
-                std::fprintf(f,"\n== interpolacion (desde el informe anterior) ==\nmodo=%s\nintermedias=%llu\nexactas_tras_intermedia=%llu\nexactas_en_paralelo_con_gpu=%llu\npresupuesto_cabe=%llu\npresupuesto_no_cabe=%llu\nsegunda_imagen_perdida=%llu\ncosto_imagen_ms=%.2f\ncosto_segunda_ms=%.2f\nespera_updates=%u\n",
+                std::fprintf(f,"\n== interpolacion (desde el informe anterior) ==\nmodo=%s\nintermedias=%llu\nexactas_tras_intermedia=%llu\nexactas_en_paralelo_con_gpu=%llu\npresupuesto_cabe=%llu\npresupuesto_no_cabe=%llu\nsegunda_imagen_perdida=%llu\ncosto_imagen_ms=%.2f\ncosto_imagen_cpu_ms=%.2f\ncosto_segunda_ms=%.2f\ncosto_segunda_cpu_ms=%.2f\nno_cabe_cpu=%llu\nno_cabe_cola=%llu\nespera_updates=%u\n",
                     present_mode().lock==enhance::kFpsLock30?"30":present_mode().lock==enhance::kFpsLock60?"60":"sin limite",
                     (unsigned long long)id[0],(unsigned long long)id[1],(unsigned long long)overlapped,(unsigned long long)id[2],(unsigned long long)id[3],(unsigned long long)id[4],
-                    b.image_ticks*tick_ms,b.second_ticks*tick_ms,b.hold);
+                    b.image_ticks*tick_ms,b.image_cpu_ticks*tick_ms,b.second_ticks*tick_ms,b.second_cpu_ticks*tick_ms,(unsigned long long)b.over_cpu,(unsigned long long)b.over_tail,b.hold);
             }
             std::fprintf(f,"\n== salud del render (desde el informe anterior) ==\nmodelos_faltantes=%llu\nfallos_productor=%llu\nfallos_vida_modelo=%llu\nfallos_particulas=%llu (ultimo: %s)\nimagenes_rechazadas=%llu\nultimo_modelo_faltante=%lu\n",
                 (unsigned long long)d[4],(unsigned long long)d[5],(unsigned long long)d[6],(unsigned long long)d[7],p.last_issue?p.last_issue:"ok",
@@ -1973,8 +2429,12 @@ extern "C" int sm64ds_fresh_native_test_report(const char* directory,std::uint64
         }else okay=false;
     }
     hooks::clear_missing_census();
-    if(summary&&summary_size)std::snprintf(summary,summary_size,"fps=%.1f p95=%.1f max=%.1f juego=%.1f render=%.1f gpu=%.1f dibujos=%.0f sin_imagen=%llu heap_mb=%.1f audio=%.1f%% faltan=%u",
-        fps,pct(95),count?intervals[count-1]:0,update.mean(),work.mean(),gpu.mean(),draws.mean(),(unsigned long long)dry_in_window,heap_free/1048576.0,audio_load,missing_models);
+    // BUILD140: model bank loads that failed since boot (BUILD 139 lost the
+    // terrain, the sky and Luigi's body to out_of_memory on the console).
+    const auto bank_failures=runtime->renderer.metrics().load_failures;
+    if(summary&&summary_size)std::snprintf(summary,summary_size,"fps=%.1f p95=%.1f max=%.1f juego=%.1f render=%.1f gpu=%.1f dibujos=%.0f sin_imagen=%llu heap_mb=%.1f audio=%.1f%% faltan=%u cargas_fallidas=%llu",
+        fps,pct(95),count?intervals[count-1]:0,update.mean(),work.mean(),gpu.mean(),draws.mean(),(unsigned long long)dry_in_window,heap_free/1048576.0,audio_load,missing_models,
+        (unsigned long long)bank_failures);
     return okay&&captured[0]&&captured[1];
 }
 
@@ -2125,11 +2585,11 @@ extern "C" int sm64ds_fresh_native_test_dump(const char* directory,int flags,cha
     }
     std::uint64_t memory_bytes=0;
     if(flags&1){
-        // The L+R+A dump's own format (SM64VM1): every readable mapping.
+        // The full RAM dump's own format (SM64VM1): every readable mapping.
         native_diagnostics::Header header;header.scene=unsigned(runtime->scene);header.epoch=unsigned(runtime->frames);header.begin_tick=svcGetSystemTick();
         std::snprintf(path,sizeof path,"%s/memoria.vm",directory);
         std::puts("PRUEBA volcado archivo memoria.vm (sin dispositivos)");std::fflush(stdout);
-        done(native_diagnostics::write_memory(path,header,memory_bytes,false));
+        done(native_diagnostics::write_memory_packed(path,header,memory_bytes,false));
     }
     if(summary&&summary_size)std::snprintf(summary,summary_size,"archivos=%u fallidos=%u comandos=%u dibujos=%u pasadas=%u memoria_mb=%.1f ms=%.0f",ok,failed,words,draws,
         have?capture.passes:0u,double(memory_bytes)/1048576.0,double(svcGetSystemTick()-begun)*1000.0/double(SYSCLOCK_ARM11));
@@ -2274,4 +2734,11 @@ extern "C" void userAppExit(void){
 }
 extern "C" void sm64ds_fresh_native_mark_clean_exit(void){clean_exit=true;}
 
+// BUILD137 hang watchdog: liveness counters for its report (racy reads).
+extern "C" unsigned sm64ds_watchdog_runtime_counters(std::uint64_t* out,unsigned capacity){
+    if(!runtime||capacity<8)return 0;
+    out[0]=runtime->unpresented;out[1]=runtime->starvation_waits;out[2]=runtime->starvation_ticks/(SYSCLOCK_ARM11/1000);
+    out[3]=runtime->starvation_timeouts;out[4]=worker&&worker->busy;out[5]=runtime->busy_drops;out[6]=runtime->scene;out[7]=runtime->frames;
+    return 8;
+}
 #endif

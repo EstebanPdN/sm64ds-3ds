@@ -69,7 +69,7 @@ struct Settings {
     // Free C-Stick camera axes, relative to the corrected default direction.
     bool camera_invert_x = false;
     bool camera_invert_y = false;
-    bool developer_dumps = true;          // Developer > Full RAM dumps (L+R+A)
+    bool developer_dumps = true;          // Developer > Full RAM dumps
     bool developer_overlay = false;
 
     // Current behaviour of the port (every new feature off). Used until the
@@ -94,6 +94,10 @@ bool load_file(const char* path, Settings& inout, ParseReport* report = nullptr)
 // to .bak first (libctru replacement can unlink before failing), with rollback
 // and read recovery. Host POSIX prefers replacement rename. No pre-unlink.
 bool save_file(const char* path, const Settings& s);
+// BUILD139: the same checked replacement on a writer thread (3DS): saving
+// from the options menu froze the game 0.8-2 s on the console's SD card.
+// The newest settings win; the host build writes synchronously.
+bool save_file_async(const char* path, const Settings& s);
 
 constexpr const char* kSettingsPath = "sdmc:/3ds/sm64ds/settings.ini";
 

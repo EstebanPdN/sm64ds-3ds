@@ -1,3 +1,4 @@
+extern "C" int sm64ds_gpu_unusable(void) __attribute__((weak));
 #include "screen_compositor.hpp"
 
 namespace sm64ds::render {
@@ -25,6 +26,10 @@ Error ScreenCompositor::init(Citro3DBackend& renderer) noexcept {
     owner_=&renderer;completed_=false;metrics_={};metrics_.output_vram_bytes=(400+320)*240*3;
     return Error::none;
 }
+bool ScreenCompositor::prepare_right_eye() noexcept {
+    if(!right_)right_=C3D_RenderTargetCreate(240,400,GPU_RB_RGB8,-1);
+    return right_!=nullptr;
+}
 Error ScreenCompositor::draw(const ScreenCanvas& top,const ScreenCanvas& bottom) noexcept {
     if(!owner_||(!owner_->can_upload()&&!owner_->can_draw()))return Error::invalid_phase;
     completed_=false;
@@ -32,13 +37,13 @@ Error ScreenCompositor::draw(const ScreenCanvas& top,const ScreenCanvas& bottom)
     // (relinking outside a C3D frame waits for the GPU and stops its queue);
     // it is presented by Citro3DBackend::submit_overlapped instead.
     const bool overlapped=owner_->overlapped();
-    if(!overlapped){C3D_RenderTargetSetOutput(nullptr,GFX_TOP,GFX_LEFT,0);C3D_RenderTargetSetOutput(nullptr,GFX_BOTTOM,GFX_LEFT,0);}
-    for(auto* target:target_)target->used=false;
+    if(!overlapped&&!right_pass_){C3D_RenderTargetSetOutput(nullptr,GFX_TOP,GFX_RIGHT,0);C3D_RenderTargetSetOutput(nullptr,GFX_TOP,GFX_LEFT,0);C3D_RenderTargetSetOutput(nullptr,GFX_BOTTOM,GFX_LEFT,0);}
+    if(!right_pass_)for(auto* target:target_)target->used=false;
     const ScreenCanvas* canvases[]={&top,&bottom};
     // Validate both screens before clearing/drawing either. Publication stays
     // detached on any subsequent resource/command-capacity failure as well.
     for(unsigned screen=0;screen<2;++screen){const auto* canvas=canvases[screen];
-        if(only_>=0&&int(screen)!=only_)continue;
+        if((right_pass_&&screen)||(only_>=0&&int(screen)!=only_))continue;
         auto error=validate(*canvas);if(error!=Error::none){++metrics_.refused;return error;}
         for(std::size_t i=0;i<canvas->layers;++i)if(!valid(canvas->layer[i].clip,screen_width(screen?Screen::bottom:Screen::top))){
             ++metrics_.refused;return Error::invalid_data;
@@ -49,10 +54,10 @@ Error ScreenCompositor::draw(const ScreenCanvas& top,const ScreenCanvas& bottom)
         }
     }
     for(unsigned screen=0;screen<2;++screen){const auto& canvas=*canvases[screen];
-        if(only_>=0&&int(screen)!=only_)continue;
+        if((right_pass_&&screen)||(only_>=0&&int(screen)!=only_))continue;
         const bool solid=canvas.brightness==-16||canvas.brightness==16;
         const auto colour=solid?(canvas.brightness<0?0x000000ffu:0xffffffffu):canvas.clear;
-        auto error=owner_->pass(target_[screen],true,colour);
+        auto error=owner_->pass(right_pass_?right_:target_[screen],true,colour);
         if(error!=Error::none){++metrics_.refused;return error;}
         if(solid){++metrics_.clear_only_screens;continue;}
         const auto side=screen?Screen::bottom:Screen::top;
@@ -79,7 +84,8 @@ Error ScreenCompositor::draw(const ScreenCanvas& top,const ScreenCanvas& bottom)
             ++metrics_.draws;
         }
     }
-    if(!overlapped){
+    if(right_pass_)C3D_RenderTargetSetOutput(right_,GFX_TOP,GFX_RIGHT,transfer);
+    else if(!overlapped){
         C3D_RenderTargetSetOutput(target_[0],GFX_TOP,GFX_LEFT,transfer);
         C3D_RenderTargetSetOutput(target_[1],GFX_BOTTOM,GFX_LEFT,transfer);
     }else for(auto* target:target_)target->used=false; // no SDK transfer of this image
@@ -92,6 +98,7 @@ Error ScreenCompositor::capture(Screen screen,void* destination,std::size_t byte
     auto* target=target_[screen==Screen::bottom];
     // The destination may contain dirty allocator metadata. Discard those
     // lines before the GPU writes, as well as after its completed transfer.
+    if(sm64ds_gpu_unusable&&sm64ds_gpu_unusable())return Error::gpu_failure; // BUILD137 (hang_watchdog.hpp)
     if(R_FAILED(GSPGPU_InvalidateDataCache(destination,bytes)))return Error::gpu_failure;
     C3D_SyncDisplayTransfer(static_cast<u32*>(target->frameBuf.colorBuf),GX_BUFFER_DIM(240,width),
         static_cast<u32*>(destination),GX_BUFFER_DIM(240,width),transfer);
@@ -103,6 +110,8 @@ Error ScreenCompositor::capture(Screen screen,void* destination,std::size_t byte
 Error ScreenCompositor::shutdown() noexcept {
     if(!owner_||!owner_->between_frames())return Error::invalid_phase;
     // SDK target deletion drains queued transfers/sampling before mesh release.
+    if(right_){C3D_RenderTargetDelete(right_);right_=nullptr;}
+    gfxSet3D(false);
     for(auto* target:target_)if(target)C3D_RenderTargetDelete(target);
     target_={};auto error=owner_->begin(false);if(error!=Error::none)return error;
     if(quad_){error=owner_->destroy(quad_);if(error==Error::none)quad_={};}

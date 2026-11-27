@@ -36,6 +36,7 @@ Error build(const RuntimeMaterial& source,const SelectedImage& selected,Extent b
     next.state.cull=faces==3?Cull::none:faces==2?Cull::back:Cull::front;
     next.state.blend=alpha==31?Blend::opaque:Blend::alpha;
     next.state.fog=lenient&&carry_fog&&(polygon&0x8000u);
+    next.state.shadow_id=((polygon>>24)&63u)==1u;
     next.state.depth_write=alpha==31 || bool(polygon&(1u<<11));next.state.alpha_cutoff=cutoff;
     // Playable approximation of the DS same-polygon-ID translucency rule: a
     // fading model must not show its own back layers (hair, crown, ...).

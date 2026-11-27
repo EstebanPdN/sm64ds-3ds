@@ -38,7 +38,7 @@ anchor=' if(!sm64ds_fresh_native_startup())return 1;'
 if main_text.count(anchor)!=1:raise ValueError('Native-test profiling boundary changed')
 profile_source=out/'native-test-game-main.cpp'
 profile_source.write_text(main_text.replace(anchor,
-    ' setenv("SM64DS_FRESH_NATIVE_PROFILE","0",0);\n setenv("SM64DS_NATIVE_LOAD_TRACE","1",0);\n setenv("SM64DS_NATIVE_STAGE_PROFILE","1",0);\n'+anchor,1))
+    ' setenv("SM64DS_FRESH_NATIVE_PROFILE","0",0);\n native_diagnostics::configure_verbose();\n setenv("SM64DS_NATIVE_LOAD_TRACE",native_diagnostics::verbose()?"1":"0",0);\n setenv("SM64DS_NATIVE_STAGE_PROFILE",native_diagnostics::verbose()?"1":"0",0);\n'+anchor,1))
 run([sys.executable,source/'build3ds/build_game.py','--native-test','--source',profile_source,'--output',out])
 # Use the exact banks of the matching tested 3DSX session, not an old CIA.
 shutil.copytree(Path(plan['sd_directory'])/'native',out/'romfs/native')

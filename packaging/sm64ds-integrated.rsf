@@ -68,6 +68,11 @@ AccessControlInfo:
     ExitThread: 9
     SleepThread: 10
     GetThreadPriority: 11
+    # BUILD137: the game threads run below libctru's APT thread (HOME/POWER
+    # must always be answered) and the render worker raises itself while it
+    # holds the GX queue lock. A kernel that enforces this list panics on an
+    # unlisted SVC.
+    SetThreadPriority: 12
     # Render worker core report (diagnostic log line).
     GetProcessorID: 17
     ReleaseMutex: 20

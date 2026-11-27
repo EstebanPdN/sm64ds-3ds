@@ -15,7 +15,25 @@
 // dark meanwhile); the notification LED turns green when it finishes.
 #if defined(SM64DS_FRESH_NATIVE_GAME)&&defined(__3DS__)
 #include "test_mode.h"
+#include "hang_watchdog.hpp"
+
+#ifdef SM64DS_PUBLIC_BETA
+// The HID wrappers use the real controls whenever these providers return zero.
+// The weak boot-resume and chainloader hooks stay unbound in this build.
+namespace { constexpr bool g_quit = false; }
+extern "C" void sm64ds_test_mode_boot() {}
+extern "C" void sm64ds_test_mode_boot_failed(const char*) {}
+extern "C" void sm64ds_test_mode_scan(std::uint32_t, std::uint32_t) {}
+extern "C" void sm64ds_test_mode_update() {}
+extern "C" int sm64ds_test_mode_keys(std::uint32_t*) { return 0; }
+extern "C" int sm64ds_test_mode_circle(int*, int*) { return 0; }
+extern "C" int sm64ds_test_mode_cstick(int*, int*) { return 0; }
+extern "C" int sm64ds_test_mode_touch(int*, int*) { return 0; }
+extern "C" std::uint32_t sm64ds_test_mode_strip(const std::uint32_t**) { return 0; }
+extern "C" std::uint32_t sm64ds_test_mode_panel(const std::uint32_t**) { return 0; }
+#else
 #include "test_mode_script.hpp"
+#include "test_mode_journey.hpp"
 #include "build_version.hpp"
 #include <3ds.h>
 #include <algorithm>
@@ -44,6 +62,7 @@ bool g_dump_due=false;int g_dump_flags=0;unsigned g_dumps=0;
 struct ZoneNote {std::uint16_t actor=0;std::uint32_t unique=0;std::int32_t distance=0;} g_zone_note[tm_::kMaxZones];
 tm_::State g_state;
 tm_::Runner g_runner;
+tm_::JourneyRunner g_journey; // BUILD137 player journey (L+SELECT+START)
 bool g_active=false,g_quit=false,g_finished_written=false,g_final_panel=false;
 unsigned g_updates=0;
 std::uint64_t g_window_tick=0,g_run_started=0,g_start_file_tick=0,g_load_ms=0;
@@ -116,11 +135,15 @@ struct Power {
 } g_power;
 
 bool tour(){return g_state.mode==tm_::Mode::tour;}
+bool journey(){return g_state.mode==tm_::Mode::journey;}
+// The run is over (final panel shown, waiting for START).
+bool run_over(){return journey()?g_finished_written:g_runner.stage()==tm_::Runner::Stage::done;}
 void run_dir(char* out,std::size_t size){std::snprintf(out,size,"%s/%02u",kBase,g_state.run);}
 // Folder of this level's situations (tour) or of the spot run.
 void level_dir(char* out,std::size_t size){
     char run[64],level[48];run_dir(run,sizeof run);
-    if(tour())tm_::level_folder(level,sizeof level,g_state.index);else std::snprintf(level,sizeof level,"informes");
+    if(tour())tm_::level_folder(level,sizeof level,g_state.index);
+    else std::snprintf(level,sizeof level,"%s",journey()?"jugador":"informes");
     std::snprintf(out,size,"%s/%s",run,level);
 }
 bool write_state(){
@@ -161,6 +184,11 @@ void publish_panel(bool cancelled,const char* failure){
         std::snprintf(line,sizeof line,"Incompletos %u  Cuelgues %u",t.incomplete,t.crashed);native_lower::centered(canvas,94,line,0xff3c3c3c);
         if(t.fps_levels){std::snprintf(line,sizeof line,"FPS medio %.1f  p95 peor %.1f ms",t.fps_tenths/10.0/t.fps_levels,t.worst_p95_tenths/10.0);
             native_lower::centered(canvas,114,line,0xff3c3c3c);}
+    }else if(journey()){
+        native_lower::centered(canvas,44,cancelled?"RECORRIDO CANCELADO":g_journey.failure()?"RECORRIDO INCOMPLETO":"RECORRIDO COMPLETO",0xff8d4300,true);
+        std::snprintf(line,sizeof line,"Informes: %u de %u",g_journey.reports(),tm_::kJourneyPhase1Reports);native_lower::centered(canvas,76,line,0xff3c3c3c);
+        std::snprintf(line,sizeof line,"Cuelgues detectados: %u",sm64ds_watchdog_hangs());native_lower::centered(canvas,96,line,0xff3c3c3c);
+        if(g_fps_reports){std::snprintf(line,sizeof line,"FPS medio %.1f  p95 peor %.1f ms",g_fps_sum/g_fps_reports,g_worst_p95);native_lower::centered(canvas,116,line,0xff3c3c3c);}
     }else{
         native_lower::centered(canvas,44,cancelled?"PRUEBA CANCELADA":"PRUEBA FINALIZADA",0xff8d4300,true);
         std::snprintf(line,sizeof line,"Informes: %u de %u",g_runner.reports(),g_runner.expected_reports());native_lower::centered(canvas,76,line,0xff3c3c3c);
@@ -200,7 +228,7 @@ bool keep_previous_log(){
 // from a new file, as each Azahar session does; a spot run keeps the copy
 // of the owner's save taken at the chord. Read lazily by save_cart.cpp.
 void use_run_save(){
-    if(tour())std::remove(kRunSave);
+    if(tour()||journey())std::remove(kRunSave); // a journey starts a new game on File A
     setenv("SM64DS_SAVE_PATH",kRunSave,1);
 }
 
@@ -356,6 +384,40 @@ void write_report(){
     }
     if(paused)sm64ds_fresh_native_report_pause(0); // flushes the log, ends the pause
 }
+// BUILD137: one journey step: CSV, summary and screenshots, plus the game state.
+// BUILD140: true when the renderer's failed bank-load count grew since the
+// previous report (the summary carries the count since boot).
+bool new_bank_failures(const char* summary){
+    static unsigned long long seen=0;
+    const char* at=std::strstr(summary,"cargas_fallidas=");if(!at)return false;
+    const unsigned long long now=std::strtoull(at+16,nullptr,10);
+    const bool grew=now>seen;seen=now;return grew;
+}
+void write_journey_report(){
+    const auto& step=g_journey.report_step();
+    char dir[96],path[160];level_dir(dir,sizeof dir);
+    std::snprintf(path,sizeof path,"%s/%02u-%s",dir,g_journey.reports(),step.id);
+    char summary[256]="";const auto begun=svcGetSystemTick();
+    const bool paused=sm64ds_fresh_native_report_pause(1)!=0;int ok=0;
+    if(paused){mkdir(dir,0777);ok=sm64ds_fresh_native_test_report(path,g_window_tick,step.why,summary,sizeof summary);append_game_state(path);}
+    // BUILD140: a model bank that failed to load (missing terrain, sky or
+    // body on screen) fails the step, so the run is not reported complete.
+    const bool banks_failed=new_bank_failures(summary);
+    char line[400];std::snprintf(line,sizeof line,"   %02u %-16s %s%s",g_journey.reports(),step.id,!ok?"FALLO ":banks_failed?"MODELOS SIN CARGAR ":"",summary);
+    result_line(line);if(!ok||banks_failed)++g_failed_reports;
+    float fps=0,p95=0;
+    if(const char* f=std::strstr(summary,"fps="))fps=std::strtof(f+4,nullptr);
+    if(const char* q=std::strstr(summary,"p95="))p95=std::strtof(q+4,nullptr);
+    // A step measured across a scene load (the letter) keeps its p95 out of the run's worst.
+    if(fps>0){g_fps_sum+=fps;++g_fps_reports;if(!step.load&&p95>g_worst_p95)g_worst_p95=p95;}
+    std::printf("PRUEBA jugador %s ok=%d writeMs=%.1f %s\n",step.id,ok,double(svcGetSystemTick()-begun)*1000.0/double(SYSCLOCK_ARM11),summary);
+    if(g_dump_due){g_dump_due=false;
+        if(paused){char folder[176];std::snprintf(folder,sizeof folder,"%s-gpu",path);mkdir(folder,0777);
+            char gpu_summary[160]="";const int good=sm64ds_fresh_native_test_dump(folder,0,gpu_summary,sizeof gpu_summary);
+            std::snprintf(line,sizeof line,"      gpu %s%s",good?"":"FALLO ",gpu_summary);result_line(line);}
+        else sm64ds_fresh_native_test_dump_arm(0);}
+    if(paused)sm64ds_fresh_native_report_pause(0);
+}
 void final_screen(bool cancelled,const char* failure){
     g_final_panel=true;
     publish_panel(cancelled,failure);
@@ -414,6 +476,21 @@ void finish(bool cancelled){
         final_screen(cancelled,stopped?"no se pudo continuar":nullptr);
         return;
     }
+    if(journey()){
+        char line[420];const double seconds=double(svcGetSystemTick()-g_run_started)/double(SYSCLOCK_ARM11);
+        // Failed report files make the run incomplete too (missing evidence).
+        const char* verdict=cancelled?"CANCELADO":g_journey.failure()||g_failed_reports?"INCOMPLETO":"COMPLETO";
+        std::snprintf(line,sizeof line,"RECORRIDO DE JUGADOR %s tras %.0f s: informes %u/%u%s, textos avanzados %u, saltos %u, punto de ruta %u/%u, "
+            "cuelgues detectados por el vigilante %u, FPS medio %.1f, peor p95 %.1f ms%s%s",
+            verdict,seconds,g_journey.reports(),tm_::kJourneyPhase1Reports,g_failed_reports?" (con fallos de informe)":"",g_journey.texts(),g_journey.stuck_jumps(),
+            g_journey.waypoint(),g_journey.route_points(),sm64ds_watchdog_hangs(),g_fps_reports?g_fps_sum/g_fps_reports:0.f,g_worst_p95,
+            g_journey.failure()?": ":"",g_journey.failure()?g_journey.failure():"");
+        result_line(line);std::printf("PRUEBA %s\n",line);
+        clear_state();
+        g_power.light(cancelled?Power::off:g_journey.failure()||g_failed_reports||sm64ds_watchdog_hangs()?Power::red:Power::green);
+        final_screen(cancelled,g_journey.failure());
+        return;
+    }
     char line[256];
     const double seconds=double(svcGetSystemTick()-g_run_started)/double(SYSCLOCK_ARM11);
     if(cancelled)std::snprintf(line,sizeof line,"CANCELADA con START tras %.0f s, informes %u",seconds,g_runner.reports());
@@ -459,6 +536,15 @@ bool begin_level(){
     unsigned steps=0;if(const char* e=std::getenv("SM64DS_PRUEBA_PASOS"))steps=unsigned(std::strtoul(e,nullptr,10));
     bool is_new=false;APT_CheckNew3DS(&is_new);
     char line[256];
+    if(journey()){
+        g_journey.start();
+        std::snprintf(line,sizeof line,"recorrido de jugador %s, %s 3DS: titulo, menu, Adventure, seleccion de partida, partida nueva en File A, intro completa, "
+            "jardines hasta la puerta del castillo (cerrada: la llave la tiene el conejo); un informe por paso; cuelgues en 3ds/sm64ds/cuelgues",
+            sm64ds_build::label,is_new?"New":"Old");
+        result_line(line);std::printf("PRUEBA boot: %s\n",line);
+        publish_strip("JUGADOR");
+        return true;
+    }
     if(tour()){
         const auto spot=tm_::tour_spot(g_state.index);
         // No title report: in PLAYABLE mode the title publishes too few
@@ -537,6 +623,12 @@ extern "C" void sm64ds_test_mode_boot(){
     g_state=state;
     if(state.phase==tm_::Phase::running){
         // The previous boot died during the run (crash, HOME, power): record it.
+        if(journey()){
+            const bool kept=keep_previous_log();
+            char line[300];std::snprintf(line,sizeof line,"RECORRIDO DE JUGADOR NO TERMINO: el juego se cerro, se colgo o se apago durante el recorrido (%s; informes del vigilante en 3ds/sm64ds/cuelgues)",
+                kept?"registro del arranque anterior: jugador/registro_cuelgue.txt":"sin registro del arranque anterior");
+            result_line(line);clear_state();aptSetSleepAllowed(true);return;
+        }
         if(!tour()){result_line("NO TERMINO: el juego se cerro o fallo durante la prueba (ver log)");clear_state();aptSetSleepAllowed(true);return;}
         const auto& level=tm_::kTour[g_state.index];char line[240];
         const bool kept=keep_previous_log();
@@ -554,24 +646,32 @@ extern "C" void sm64ds_test_mode_scan(std::uint32_t held,std::uint32_t down){
     const std::uint32_t chord=tm_::kSelect|tm_::kStart;
     const bool chord_now=(held&chord)==chord&&(down&chord);
     if(g_active){
-        if(g_runner.stage()==tm_::Runner::Stage::done){
+        if(run_over()){
             if(g_final_panel&&(down&tm_::kStart)){g_power.light(Power::off);g_power.screens_on();restart();}
             return;
         }
         // START cancels; the final panel stays until START restarts the game.
-        if(down&tm_::kStart){g_runner.cancel("cancelada con START");finish(true);}
+        if(down&tm_::kStart){if(!journey())g_runner.cancel("cancelada con START");finish(true);}
         return;
     }
-    if(!chord_now||g_quit)return;
-    Sm64dsTestPlayer p;sm64ds_test_game_observe(current_scene(),&p);
+    // BUILD137: a SELECT+START without L or R waits up to 12 scans for one of
+    // them to join, so the order of the presses does not start the wrong run.
+    static unsigned chord_wait=0;
+    if(g_quit||(!chord_now&&!chord_wait))return;
     const bool spot=(held&tm_::kR)!=0;
+    // L+SELECT+START, the player journey (anywhere).
+    const bool walk=!spot&&(held&tm_::kL)!=0;
+    if(!spot&&!walk&&(chord_wait?++chord_wait<=12:(chord_wait=1,true)))return;
+    chord_wait=0;
+    Sm64dsTestPlayer p;sm64ds_test_game_observe(current_scene(),&p);
     if(spot&&!p.present){std::puts("PRUEBA: R+SELECT+START ignored outside a level");return;}
     mkdir("sdmc:/3ds",0777);mkdir("sdmc:/3ds/sm64ds",0777);mkdir(kBase,0777);
     unsigned run=1;
     for(;run<100;++run){char dir[64];std::snprintf(dir,sizeof dir,"%s/%02u",kBase,run);struct stat st;if(stat(dir,&st)!=0)break;}
     if(run>=100){std::puts("PRUEBA: 99 runs already on SD");return;}
     g_state={};g_state.run=run;g_state.phase=tm_::Phase::pending;
-    if(spot){
+    if(walk){g_state.mode=tm_::Mode::journey;g_state.index=0;}
+    else if(spot){
         auto& s=g_state.spot;g_state.mode=tm_::Mode::spot;
         s.level=p.level;s.area=p.area;s.character=p.character>=0&&p.character<4?p.character:0;
         s.x=p.x;s.y=p.y;s.z=p.z;s.angle=std::int16_t(p.angle);s.position=true;
@@ -582,7 +682,7 @@ extern "C" void sm64ds_test_mode_scan(std::uint32_t held,std::uint32_t down){
     if(spot)if(const char* save=std::getenv("SM64DS_SAVE_PATH"))if(copy_file(save,kRunSave)==0){
         std::remove(kRunSave);std::puts("PRUEBA: save copy failed; the spot run starts from a new file");}
     if(!write_state()){std::puts("PRUEBA: could not write state");return;}
-    std::printf("PRUEBA: %s run=%u; restarting\n",spot?"R+SELECT+START spot":"SELECT+START tour",run);
+    std::printf("PRUEBA: %s run=%u; restarting\n",walk?"L+SELECT+START journey":spot?"R+SELECT+START spot":"SELECT+START tour",run);
     publish_strip("REINICIANDO");
     restart();
 }
@@ -595,9 +695,53 @@ static void park(){
     if(!logged){logged=true;ndspSetMasterVol(0.f);std::puts("PRUEBA fin: juego en reposo hasta START");std::fflush(stdout);}
     svcSleepThread(g_power.dark?250000000LL:50000000LL);
 }
+extern "C" int sm64ds_title_menu_state() __attribute__((weak));
 extern "C" void sm64ds_test_mode_update(){
     ++g_updates;
+    // Development (env.txt, .3dsx only): the player's state every second, to
+    // take positions for the journey script (SM64DS_PRUEBA_POSICION=1).
+    {static const bool trace=std::getenv("SM64DS_PRUEBA_POSICION")!=nullptr;
+     if(trace&&g_updates%30==0){const auto o=observe();
+        std::printf("PRUEBA posicion: escena=%u menu=%d nivel=%d area=%d jugador=%u control=%u dialogo=%u pausa=%u x=%ld y=%ld z=%ld angulo=%d\n",
+            o.scene,sm64ds_title_menu_state?sm64ds_title_menu_state():-1,o.level,o.area,unsigned(o.player),unsigned(o.control),unsigned(o.dialogue),unsigned(o.paused),
+            long(o.x>>12),long(o.y>>12),long(o.z>>12),int(o.angle));
+        // SM64DS_PRUEBA_POSICION=2: also the live actors near the player every 3 s.
+        if(trace&&std::getenv("SM64DS_PRUEBA_POSICION")[0]=='2'&&o.player&&g_updates%90==0){
+            static Sm64dsTestActor actors[512];const unsigned total=sm64ds_test_game_actors(actors,512);
+            for(unsigned i=0;i<total&&i<512;++i){const auto& a=actors[i];
+                const long long dx=(a.x-o.x)>>12,dz=(a.z-o.z)>>12;if(dx*dx+dz*dz>4000LL*4000LL||a.player)continue;
+                std::printf("PRUEBA actor: id=%u unico=%lu area=%d vivo=%u x=%ld y=%ld z=%ld\n",unsigned(a.id),(unsigned long)a.unique,int(a.area),unsigned(a.alive),
+                    long(a.x>>12),long(a.y>>12),long(a.z>>12));}
+        }}}
     if(!g_active){g_have_command=false;return;}
+    if(journey()){
+        // Development (.3dsx with SM64DS_PRUEBA_RUTA=1 in env.txt; the CIA
+        // never reads env.txt, so a stray file cannot change a console run):
+        // prueba/ruta.txt overrides the castle route, one "x z radius" line
+        // per point (whole units, radius > 0), read when the walk starts.
+        {static bool route_read=false;
+         if(!route_read&&g_journey.phase()==tm_::JourneyRunner::Phase::walk){route_read=true;
+            if(FILE* f=std::getenv("SM64DS_PRUEBA_RUTA")?std::fopen("sdmc:/3ds/sm64ds/prueba/ruta.txt","r"):nullptr){
+                tm_::Waypoint points[tm_::JourneyRunner::kMaxRoute];unsigned n=0;long x,z,r;
+                while(n<tm_::JourneyRunner::kMaxRoute&&std::fscanf(f,"%ld %ld %ld",&x,&z,&r)==3)if(r>0)points[n++]={std::int32_t(x),std::int32_t(z),std::int32_t(r)};
+                std::fclose(f);if(n){g_journey.set_route(points,n);char line[96];
+                    std::snprintf(line,sizeof line,"   -- ruta de desarrollo prueba/ruta.txt: %u puntos (no la ruta normal)",n);result_line(line);std::printf("PRUEBA %s\n",line);}
+            }}}
+        if(g_final_panel&&run_over())park();
+        if(run_over()){g_have_command=true;g_command={};g_command.inject=true;return;}
+        tm_::JourneyObservation seen;seen.game=observe();seen.menu=sm64ds_title_menu_state?sm64ds_title_menu_state():-1;
+        const auto c=g_journey.update(seen);
+        g_command={};g_command.pad=c.pad;g_command.inject=c.inject;g_have_command=c.inject;
+        // BUILD138: every journey step also records the GPU command list of
+        // one image of its window (comandos_gpu.bin): the menu, the file
+        // selector and the opening get a PICA stream that
+        // tools/check_pica_hardware.py can check against the console's rules.
+        if(c.window){g_window_tick=svcGetSystemTick();sm64ds_fresh_native_audio_window();g_dump_flags=0;g_dump_due=true;sm64ds_fresh_native_test_dump_arm(1);}
+        if(c.action==tm_::JourneyAction::report)write_journey_report();
+        if(c.action==tm_::JourneyAction::finish||g_journey.finished()){finish(false);return;}
+        char status[48];std::snprintf(status,sizeof status,"JUGADOR %02u/%02u",g_journey.reports(),tm_::kJourneyPhase1Reports);publish_strip(status);
+        return;
+    }
     if(g_final_panel&&g_runner.stage()==tm_::Runner::Stage::done)park();
     if(g_runner.stage()==tm_::Runner::Stage::idle||g_runner.stage()==tm_::Runner::Stage::done){g_have_command=g_runner.stage()==tm_::Runner::Stage::done;g_command={};g_command.inject=true;return;}
     const auto o=observe();
@@ -625,7 +769,7 @@ extern "C" void sm64ds_test_mode_update(){
     case tm_::Action::zones:choose_zones();break;
     case tm_::Action::start_file:{
         const int level=tour()?tm_::tour_spot(g_state.index).level:g_state.spot.level;
-        sm64ds_test_game_start_file(level);g_start_file_tick=svcGetSystemTick();g_load_ms=0;
+        sm64ds_test_game_start_file(level,!tour()&&g_state.spot.position?g_state.spot.area:-1);g_start_file_tick=svcGetSystemTick();g_load_ms=0;
         std::printf("PRUEBA StartFile level=%d\n",level);
         break;}
     case tm_::Action::set_character:sm64ds_test_game_set_character(g_runner.home().character);break;
@@ -666,7 +810,16 @@ extern "C" std::uint32_t sm64ds_test_mode_strip(const std::uint32_t** pixels){
 extern "C" std::uint32_t sm64ds_test_mode_panel(const std::uint32_t** pixels){
     const auto r=g_panel_revision.load(std::memory_order_acquire);if(r)*pixels=g_panel[r&1];return r;
 }
+#endif // SM64DS_PUBLIC_BETA
+
 // The game loop ends like a HOME close, so the chainloader relaunches us.
 extern "C" bool __real_aptMainLoop(void);
-extern "C" bool __wrap_aptMainLoop(void){return !g_quit&&__real_aptMainLoop();}
+// BUILD137: the hang watchdog sees every entry (HOME, POWER and sleep are
+// only answered here, on the host thread).
+extern "C" bool __wrap_aptMainLoop(void){
+    sm64ds_watchdog_host_stage(SM64DS_WATCH_HOST_APT);
+    const bool run=!g_quit&&__real_aptMainLoop();
+    sm64ds_watchdog_host_stage(SM64DS_WATCH_HOST_HOOK);
+    return run;
+}
 #endif

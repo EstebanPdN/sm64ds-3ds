@@ -26,7 +26,7 @@ int main(){
  key(m,128);key(m,16);assert(m.settings().camera_invert_y);m.value(5,value,sizeof value);assert(!std::strcmp(value,"On"));
  key(m,128);key(m,1);assert(m.finished()&&m.accepted());assert(m.take_requests()==SaveSettings);assert(!m.take_requests());
  m.begin(initial,2,true);key(m,16);key(m,128);key(m,1);key(m,2);key(m,2);assert(m.finished()&&!m.accepted()&&m.settings()==initial&&!m.take_requests());
- m.begin(initial,0,false);m.value(0,value,sizeof value);assert(!value[0]);assert(!std::strcmp(m.label(0),"Audio"));key(m,1);assert(m.page()==Page::Audio&&m.count()==2);assert(!std::strcmp(m.label(0),"Sound mode"));m.value(0,value,sizeof value);assert(!std::strcmp(value,"Surround"));key(m,16);assert(m.sound()==1);m.value(0,value,sizeof value);assert(!std::strcmp(value,"Headphones"));key(m,16);assert(m.sound()==2);m.value(0,value,sizeof value);assert(!std::strcmp(value,"Stereo"));key(m,32);assert(m.sound()==1);key(m,2);assert(m.page()==Page::Options&&!m.finished());key(m,128);key(m,1);assert(m.page()==Page::Display);key(m,16);assert(m.settings().res3d==Res3d::Native);key(m,128);key(m,16);assert(m.settings().screen_mode==1);key(m,2);assert(m.page()==Page::Options);key(m,128);key(m,128);key(m,1);assert(m.page()==Page::Developer);assert(!std::strcmp(m.label(1),"Dump RAM"));m.value(2,value,sizeof value);assert(!value[0]);key(m,128);key(m,1);assert(!m.take_requests());key(m,64);key(m,1);assert(m.settings().developer_dumps);key(m,128);key(m,1);assert(m.take_requests()==DumpFull);key(m,128);key(m,1);assert(m.page()==Page::ConfirmDelete&&m.selected()==0);key(m,1);assert(m.page()==Page::Developer&&!m.take_requests());key(m,1);key(m,128);key(m,1);assert(m.take_requests()==DeleteDumps);key(m,128);key(m,1);assert(m.settings().show_fps);key(m,128);assert(m.first()==3);key(m,1);assert(m.settings().developer_overlay);key(m,2);assert(m.page()==Page::Options);key(m,128);key(m,128);key(m,128);key(m,1);assert(m.page()==Page::Update&&m.count()==0&&m.first()==0);key(m,2);assert(m.page()==Page::Options);key(m,2);assert(m.finished()&&!m.accepted()&&m.settings()==initial);
+ m.begin(initial,0,false);m.value(0,value,sizeof value);assert(!value[0]);assert(!std::strcmp(m.label(0),"Audio"));key(m,1);assert(m.page()==Page::Audio&&m.count()==2);assert(!std::strcmp(m.label(0),"Sound mode"));m.value(0,value,sizeof value);assert(!std::strcmp(value,"Surround"));key(m,16);assert(m.sound()==1);m.value(0,value,sizeof value);assert(!std::strcmp(value,"Headphones"));key(m,16);assert(m.sound()==2);m.value(0,value,sizeof value);assert(!std::strcmp(value,"Stereo"));key(m,32);assert(m.sound()==1);key(m,2);assert(m.page()==Page::Options&&!m.finished());key(m,128);key(m,1);assert(m.page()==Page::Display);key(m,16);assert(m.settings().res3d==Res3d::Native);key(m,128);key(m,16);assert(m.settings().screen_mode==1);key(m,2);assert(m.page()==Page::Options&&m.selected()==1);key(m,128);key(m,1);assert(m.page()==Page::Developer);assert(!std::strcmp(m.label(1),"Dump RAM"));m.value(2,value,sizeof value);assert(!value[0]);key(m,128);key(m,1);assert(!m.take_requests());key(m,64);key(m,1);assert(m.settings().developer_dumps);key(m,128);key(m,1);assert(m.take_requests()==DumpFull);key(m,128);key(m,1);assert(m.page()==Page::ConfirmDelete&&m.selected()==0);key(m,1);assert(m.page()==Page::Developer&&!m.take_requests());key(m,1);key(m,128);key(m,1);assert(m.take_requests()==DeleteDumps);key(m,128);key(m,1);assert(m.settings().show_fps);key(m,128);assert(m.first()==3);key(m,1);assert(m.settings().developer_overlay);key(m,2);assert(m.page()==Page::Options&&m.selected()==2);key(m,128);key(m,1);assert(m.page()==Page::Update&&m.count()==0&&m.first()==0);key(m,2);assert(m.page()==Page::Options);key(m,2);assert(m.finished()&&!m.accepted()&&m.settings()==initial);
  for(unsigned mode=0;mode<3;++mode){
   auto settings=initial;settings.controller_mode=uint8_t(mode);
   m.begin(settings,2,true);m.value(0,value,sizeof value);const char* modes[]={"Standard","Touch","Dual-hand"};assert(!std::strcmp(value,modes[mode]));
@@ -47,7 +47,8 @@ int main(){
  m.update(ds({0,true,128,144}));assert(m.first()==3&&m.selected()==3&&m.settings()==before_page);
  m.update(ds({0,true,140,48}));assert(m.page()==Page::Update&&m.count()==0);
  m.update(ds({0,true,128,144}));assert(m.page()==Page::Update&&!m.finished());
- m.update(ds({0,true,230,168}));assert(m.page()==Page::Options&&!m.finished());
+ m.update(ds({0,true,230,168}));assert(m.page()==Page::Options&&!m.finished()&&m.selected()==3&&m.first()==3); // back on Update's row
+ m.update(ds({0,true,128,144}));assert(m.first()==0);
  m.update(ds({0,true,140,124}));assert(m.page()==Page::Developer);
  m.update(ds({0,true,24,144}));assert(m.selected()==0&&!m.settings().developer_dumps);
  m.update(ds({0,true,128,144}));assert(m.first()==3&&!m.settings().show_fps&&!m.settings().developer_overlay);
@@ -62,7 +63,7 @@ int main(){
  key(m,16);assert(m.settings().audio_volume==105);key(m,32);assert(m.settings().audio_volume==100);
  for(int i=0;i<100;++i)key(m,16);assert(m.settings().audio_volume==200);for(int i=0;i<100;++i)key(m,32);assert(m.settings().audio_volume==0);
  m.update(ds({0,true,161,90,true}));assert(m.settings().audio_volume==100);m.update(ds({0,false,189,90,true}));assert(m.settings().audio_volume==200);m.update(ds({0,false,1,50,true}));assert(m.settings().audio_volume==0);m.update(ds({0,false,255,180,true}));assert(m.settings().audio_volume==200);m.update(ds({0,false,161,90,true}));assert(m.settings().audio_volume==100);m.update(ds({0,false,161,90,false}));
- m.update(ds({0,true,232,90,true}));assert(m.settings().audio_volume==105);m.update(ds({0,false,232,90,true}));assert(m.settings().audio_volume==105);m.update(ds({0,false,232,90,false}));m.update(ds({0,true,120,90,true}));assert(m.settings().audio_volume==100);key(m,128);key(m,1);assert(m.finished()&&m.accepted());
+ m.update(ds({0,true,232,90,true}));assert(m.settings().audio_volume==105);m.update(ds({0,false,232,90,true}));assert(m.settings().audio_volume==105);m.update(ds({0,false,232,90,false}));m.update(ds({0,true,120,90,true}));assert(m.settings().audio_volume==100);key(m,128);key(m,1);assert(m.page()==Page::Options&&m.selected()==0&&!m.finished());for(unsigned i=0;i<m.count();++i)key(m,128);key(m,1);assert(m.finished()&&m.accepted());
  m.begin(initial,0,false);key(m,1);m.update(ds({0,true,189,90,true}));assert(m.settings().audio_volume==200);m.update(ds({2,false,189,90,true}));assert(m.page()==Page::Options);key(m,2);assert(m.finished()&&!m.accepted()&&m.settings().audio_volume==100);
  uint8_t percentage[8];assert(encode("100%",percentage,sizeof percentage)==4&&percentage[3]==0x4f&&percentage[4]==0xff);
  // Stationary drags and saturated side taps do not repaint identical UI.
@@ -99,7 +100,7 @@ int main(){
   if(page==0){assert(render_native_panel(72,chars.data()+1,0x10000,bg1.data(),1024));assert(render_volume_slider(200,chars.data()+1,0x10000,map.data()+1,1024));}
   if(page==2)assert(render_native_panel(56,chars.data()+1,0x10000,bg1.data(),1024));
   assert(backup.capture(chars.data()+1,0x10000,map.data()+1,1024,bg1.data(),1024)); // begin cannot overwrite parent snapshot
-  if(accept){for(unsigned i=0;i<m.count();++i)key(m,128);key(m,1);}else{key(m,2);if(!m.finished())key(m,2);}
+  if(accept){for(unsigned i=0;i<m.count();++i)key(m,128);key(m,1);if(!m.finished()){assert(m.page()==Page::Options);for(unsigned i=0;i<8&&m.selected()!=m.count();++i)key(m,128);assert(m.footer()==0);key(m,1);}}else{key(m,2);if(!m.finished())key(m,2);}
   assert(m.finished()&&m.accepted()==accept);assert(backup.restore());assert(!backup.saved());assert(chars==original_chars&&map==original_map&&bg1==original_bg1);
   chars[0x4ff1]=0x43;assert(!backup.restore()&&chars[0x4ff1]==0x43); // later parent CONTROLLER label survives
  }
@@ -116,6 +117,10 @@ int main(){
  m.begin_general(initial,0);for(unsigned i=0;i<5;++i)key(m,128);key(m,1);
  assert(m.finished()&&m.accepted()&&!m.take_requests());
  m.begin_general(initial,0);key(m,1);key(m,1);key(m,2);for(unsigned i=0;i<5;++i)key(m,128);key(m,1);assert(m.finished()&&m.accepted()&&m.take_requests()==SaveSettings);
+ // OK or Back on a category returns to Options on that category's row.
+ m.begin_general(initial,0);key(m,128);key(m,128);key(m,1);assert(m.page()==Page::Display);for(unsigned i=0;i<m.count();++i)key(m,128);key(m,1);
+ assert(m.page()==Page::Options&&m.selected()==2&&!m.finished());key(m,64);key(m,1);assert(m.page()==Page::Audio);key(m,2);assert(m.page()==Page::Options&&m.selected()==1&&!m.finished());
+ for(unsigned i=0;i<8&&m.selected()!=m.count();++i)key(m,128);key(m,1);assert(m.finished()&&m.accepted());
  // Full orange submenu rows open the category from the left half too.
  for(unsigned category=0;category<5;++category){
   m.begin_general(initial,0);
@@ -130,7 +135,7 @@ int main(){
  // and A retain the explicit capture action; Full Dumps reflects the same flag.
  m.begin(initial,0,false);key(m,128);key(m,128);key(m,1);key(m,128);
  key(m,16);assert(m.settings().developer_dumps&&!m.take_requests());
- m.value(1,value,sizeof value);assert(!std::strcmp(value,"L+R+A"));
+ m.value(1,value,sizeof value);assert(!std::strcmp(value,"Press A"));
  m.value(0,value,sizeof value);assert(!std::strcmp(value,"On"));
  key(m,32);assert(!m.settings().developer_dumps&&!m.take_requests());
  key(m,1);assert(!m.take_requests());

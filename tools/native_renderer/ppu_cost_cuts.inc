@@ -15,6 +15,18 @@
     }();
     return value;
 }
+// BUILD140: the native map's foreground keeps blended texels translucent and
+// the GPU blends them over the map (gpu_alpha_patch, ppu_affine_front.inc).
+// Off with the cuts; PPU_NO_GPU_ALPHA (build flag or environment) keeps the
+// CPU blend for the exact-output comparisons on the host.
+[[maybe_unused]] static bool ppu_gpu_alpha(){
+#if defined(PPU_NO_GPU_ALPHA)
+    return false;
+#else
+    static const bool value=ppu_cost_cuts() && std::getenv("PPU_NO_GPU_ALPHA")==nullptr;
+    return value;
+#endif
+}
 // The affine memo's planned compare (ppu_affine_memo.inc) relies on
 // update_text_layer's incremental tile update.
 [[maybe_unused]] static bool ppu_memo_cut(){

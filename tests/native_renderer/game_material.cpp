@@ -10,6 +10,11 @@ int main(){
     assert(capture_material(source,image,{32,16},{32,16},0,4096,result)==Error::none);
     assert(result.texture==4&&result.palette==7&&result.diffuse==0xff0000ff&&result.emission==0x00ff00ff);
     assert(result.state.uv[0]==2 && result.state.uv[4]==.5 && result.state.uv[5]==0);
+    // BUILD140: DS polygon ID 1 (the ID SM64DS draws every shadow with) marks a shadow owner.
+    assert(!result.state.shadow_id);
+    source.polygon=(1u<<24)|(31u<<16)|192;assert(capture_material(source,image,{32,16},{32,16},0,4096,result)==Error::none&&result.state.shadow_id);
+    source.polygon=(2u<<24)|(31u<<16)|192;assert(capture_material(source,image,{32,16},{32,16},0,4096,result)==Error::none&&!result.state.shadow_id);
+    source.polygon=(31u<<16)|192;
     source.texture_flags=1u<<30;
     assert(capture_material(source,image,{32,16},{32,16},0,4096,result)==Error::none);
     assert(result.state.uv_mode==UvMode::fixed&&result.state.fixed_uv.width==32&&result.state.fixed_uv.height==16);

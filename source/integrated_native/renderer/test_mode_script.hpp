@@ -146,7 +146,8 @@ inline Pad pad_for(const Step& s,unsigned u){
 
 // ---- State kept on SD between the chord and the restarted boots ----
 enum class Phase:std::uint8_t{none,pending,running,final_};
-enum class Mode:std::uint8_t{spot,tour};
+// journey (BUILD137): L+SELECT+START, the player journey (test_mode_journey.hpp).
+enum class Mode:std::uint8_t{spot,tour,journey};
 struct Spot {
     int level=-1,area=-1,character=0;
     std::int32_t x=0,y=0,z=0;std::int16_t angle=0;
@@ -167,7 +168,7 @@ inline int format_state(const State& s,char* out,std::size_t size){
     return std::snprintf(out,size,"SM64DS_PRUEBA_V2\ncarpeta=%u\nfase=%s\nmodo=%s\nindice=%u\nnivel=%d\narea=%d\npersonaje=%d\nposicion=%d\nx=%ld\ny=%ld\nz=%ld\nangulo=%d\n"
         "completos=%u\nincompletos=%u\ncolgados=%u\nfps_decimas=%u\nfps_niveles=%u\np95_peor_decimas=%u\n"
         "paso=%u\ninformes=%u\nreentradas=%u\nfallidos=%u\nfps_nivel_centesimas=%u\nfps_nivel_informes=%u\np95_nivel_decimas=%u\ninformes_zona=%u\n",
-        s.run,phase_name(s.phase),s.mode==Mode::tour?"recorrido":"punto",s.index,s.spot.level,s.spot.area,s.spot.character,
+        s.run,phase_name(s.phase),s.mode==Mode::tour?"recorrido":s.mode==Mode::journey?"jugador":"punto",s.index,s.spot.level,s.spot.area,s.spot.character,
         int(s.spot.position),long(s.spot.x),long(s.spot.y),long(s.spot.z),int(s.spot.angle),
         s.totals.complete,s.totals.incomplete,s.totals.crashed,s.totals.fps_tenths,s.totals.fps_levels,s.totals.worst_p95_tenths,
         s.resume.step,s.resume.reports,s.resume.reentries,s.resume.failed,s.resume.fps_hundredths,s.resume.fps_reports,s.resume.p95_tenths,
@@ -194,7 +195,8 @@ inline bool parse_state(const char* text,std::size_t size,State& out){
         }
         if(!std::strcmp(line,"modo")){
             if(v1)return false;
-            if(!std::strcmp(v,"recorrido"))s.mode=Mode::tour;else if(!std::strcmp(v,"punto"))s.mode=Mode::spot;else return false;
+            if(!std::strcmp(v,"recorrido"))s.mode=Mode::tour;else if(!std::strcmp(v,"punto"))s.mode=Mode::spot;
+            else if(!std::strcmp(v,"jugador"))s.mode=Mode::journey;else return false;
             have_mode=true;continue;
         }
         const long value=std::strtol(v,&stop,10);if(stop==v||*stop)return false;
@@ -228,6 +230,7 @@ inline bool parse_state(const char* text,std::size_t size,State& out){
     }
     if(!have_run||!have_phase||!have_level||!have_mode)return false;
     if(s.mode==Mode::spot&&(s.spot.level<0||s.index))return false;
+    if(s.mode==Mode::journey&&s.index)return false;
     // Only a tour resumes, and never with more reports than steps before it.
     if((s.mode!=Mode::tour&&(s.resume.step||s.resume.reports||s.resume.reentries))||s.resume.reports>s.resume.step||
        s.resume.zone_reports>s.resume.reports)return false;

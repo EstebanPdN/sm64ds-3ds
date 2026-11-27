@@ -52,22 +52,6 @@ template<class Sink> void action_button(Sink& out,int x,int y,int width,int heig
  retail_frame(out,x,y,width,height,retail_pause_art::action,retail_pause_art::action_width,retail_pause_art::action_height);
  retail_text(out,x,y,width,height,label,true);
 }
-template<class Sink> void dump_shortcut(Sink& out,int x,int y,int width,int height){
- constexpr int gap=2,pw=retail_pause_art::shortcut_plus_width;
- const int total=text_width("LRA")+2*(pw+2*gap),top=y+(height-16)/2;
- int left=x+(width-total)/2;
- const char* letters[]={"L","R","A"};
- for(unsigned i=0;i<3;++i){
-  text(out,left,top,letters[i],0xff8d4300);left+=text_width(letters[i]);
-  if(i==2)break;
-  left+=gap;
-  for(unsigned v=0;v<retail_pause_art::shortcut_plus_height;++v)for(unsigned u=0;u<retail_pause_art::shortcut_plus_width;++u){
-   const uint32_t c=retail_pause_art::shortcut_plus[v*pw+u];
-   if(c>>24)out.pixel(left+int(u),top+5+int(v),c);
-  }
-  left+=pw+gap;
- }
-}
 template<class Sink> void root(Sink& out,unsigned selected,unsigned count,const uint16_t* positions){
  const char* labels[]={"CONTINUE","CONTROLLER","OPTIONS","QUIT"};count=std::min(count,4u);
  for(unsigned i=0;i<count;++i){const int y=int(positions[i]/32)*10;button(out,10,y,300,40,labels[i],selected==i,true);if(selected==i)star(out,20,y+12);}
@@ -135,9 +119,7 @@ template<class Sink> void menu(Sink& out,const enhance::native_pause::Menu& mode
   }else if(page==Page::Developer&&row==2){
    action_button(out,155,y,137,36,"CLEAN");
   }else{
-   const bool shortcut=page==Page::Developer&&row==1&&model.settings().developer_dumps;
-   button(out,155,y,137,36,shortcut?"":value,active);
-   if(shortcut)dump_shortcut(out,155,y,137,36);
+   button(out,155,y,137,36,value,active);
    arrow(out,142,y+11,false);arrow(out,298,y+11,true);
   }
  }

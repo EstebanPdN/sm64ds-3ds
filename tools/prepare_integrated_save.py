@@ -25,13 +25,54 @@ def once(text, old, new):
     return text.replace(old, new, 1)
 
 
+LOAD_HEAD = 'bool load(unsigned char (&image)[Capacity]) {\n'
+STORE_FN = ('bool store(const unsigned char (&image)[Capacity]) {\n'
+            '    return integrated_storage::replace_file(savePath(),image,Capacity);\n}\n')
+# BUILD139: the console spent hundreds of milliseconds per SaveDataToCart on
+# the game thread (read the 8 KiB image, then write .tmp, sync and rename):
+# the save box after the key ran at 12 FPS. On the 3DS the image is cached
+# in memory (game thread only) and handed to the writer thread of
+# native_renderer/save_writer.cpp, which performs the same checked
+# replacement (with its .bak recovery) for the newest image. The host build
+# stays synchronous, so the format tests see every write.
+WRITE_BEHIND = r"""bool load_sd(unsigned char (&image)[Capacity]) {
+"""
+WRITE_BEHIND_STORE = r"""bool store_sd(const unsigned char (&image)[Capacity]) {
+    return integrated_storage::replace_file(savePath(),image,Capacity);
+}
+#ifdef __3DS__
+}
+extern "C" int sm64ds_save_write_behind(const char*,const void*,unsigned) __attribute__((weak));
+namespace {
+unsigned char cache[Capacity];bool cache_valid=false;
+bool load(unsigned char (&image)[Capacity]) {
+    if(!cache_valid){if(!load_sd(cache))return false;cache_valid=true;}
+    std::memcpy(image,cache,Capacity);return true;
+}
+bool store(const unsigned char (&image)[Capacity]) {
+    if(!(sm64ds_save_write_behind&&sm64ds_save_write_behind(savePath(),image,Capacity))&&!store_sd(image))return false;
+    std::memcpy(cache,image,Capacity);cache_valid=true;return true;
+}
+#else
+bool load(unsigned char (&image)[Capacity]) {return load_sd(image);}
+bool store(const unsigned char (&image)[Capacity]) {return store_sd(image);}
+#endif
+"""
+
+
+def patch_write_behind(text):
+    text = once(text, LOAD_HEAD, WRITE_BEHIND)
+    return once(text, STORE_FN, WRITE_BEHIND_STORE)
+
+
 def patch_cart(text):
     text = once(text, '#include "SaveData.h"',
                 '#include "SaveData.h"\n#include "../platform/3ds/atomic_file.hpp"')
     text = once(text, 'FILE* file=std::fopen(savePath(),"rb");',
                 'FILE* file=integrated_storage::open_read(savePath());')
-    return once(text, STORE,
+    text = once(text, STORE,
                 '    return integrated_storage::replace_file(savePath(),image,Capacity);')
+    return patch_write_behind(text)
 
 
 def prepare(output):
